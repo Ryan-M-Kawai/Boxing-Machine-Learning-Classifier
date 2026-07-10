@@ -2,6 +2,101 @@ import cv2
 import numpy as np
 from helper_functions import angle, lm_to_list, lm_to_list_2d
 import math
+# Logitech C310 HD Webcam fixed focal length = 2.33mm
+# height of person in real world = 172.7 cm
+# height of camera is 87.6 mm
+# ── Camera & body calibration
+FOCAL_LENGTH_MM       = 4.4      # from webcam spec sheet
+SENSOR_WIDTH_MM       = 4.8      # CHECK this against your webcam's actual datasheet
+REAL_WORLD_HEIGHT_CM  = 172.7
+CAMERA_HEIGHT_CM      = 87.6
+CAMERA_TILT_DEG       = 0.0      # measure/estimate the downward tilt of your webcam
+
+# Torso rectangle — anthropometric fractions of height (swap in real
+# tape-measure numbers here if you have them, for better accuracy)
+SHOULDER_HALF_WIDTH_CM = REAL_WORLD_HEIGHT_CM * 0.129
+HIP_HALF_WIDTH_CM      = REAL_WORLD_HEIGHT_CM * 0.091
+TORSO_LENGTH_CM        = REAL_WORLD_HEIGHT_CM * 0.288
+
+MODEL_POINTS = np.array([
+    [-SHOULDER_HALF_WIDTH_CM, 0, 0],                 # left shoulder
+    [ SHOULDER_HALF_WIDTH_CM, 0, 0],                 # right shoulder
+    [-HIP_HALF_WIDTH_CM, -TORSO_LENGTH_CM, 0],       # left hip
+    [ HIP_HALF_WIDTH_CM, -TORSO_LENGTH_CM, 0],       # right hip
+], dtype=np.float32)
+
+UPPER_ARM_CM = REAL_WORLD_HEIGHT_CM * 0.186   # shoulder -> elbow
+FOREARM_CM   = REAL_WORLD_HEIGHT_CM * 0.146   # elbow -> wrist
+
+
+def get_camera_matrix(image_width_px, image_height_px):
+    f = FOCAL_LENGTH_MM * image_width_px / SENSOR_WIDTH_MM   # px
+    cx, cy = image_width_px / 2, image_height_px / 2
+    return np.array([[f, 0, cx], [0, f, cy], [0, 0, 1]], dtype=np.float32)
+
+
+def get_torso_pose(landmarks, image_width_px, image_height_px, camera_matrix):
+    """Returns (torso_center_camera_cm, R) via PnP, or (None, None) if it fails."""
+    image_points = np.array([
+        [landmarks[11].x * image_width_px, landmarks[11].y * image_height_px],
+        [landmarks[12].x * image_width_px, landmarks[12].y * image_height_px],
+        [landmarks[23].x * image_width_px, landmarks[23].y * image_height_px],
+        [landmarks[24].x * image_width_px, landmarks[24].y * image_height_px],
+    ], dtype=np.float32)
+
+    dist_coeffs = np.zeros(4, dtype=np.float32)
+    success, rvec, tvec = cv2.solvePnP(MODEL_POINTS, image_points, camera_matrix, dist_coeffs)
+    if not success:
+        return None, None
+    R, _ = cv2.Rodrigues(rvec)
+    return tvec.flatten(), R
+
+
+def pixel_to_ray(u, v, camera_matrix):
+    cx, cy = camera_matrix[0, 2], camera_matrix[1, 2]
+    fx, fy = camera_matrix[0, 0], camera_matrix[1, 1]
+    ray = np.array([(u - cx) / fx, (v - cy) / fy, 1.0])
+    return ray / np.linalg.norm(ray)
+
+
+def solve_child_depth(parent_3d, ray_dir_unit, bone_length_cm, prev_child_3d=None):
+    """Intersects a camera ray with a sphere of radius bone_length_cm around parent_3d."""
+    a = np.dot(ray_dir_unit, ray_dir_unit)
+    b = -2 * np.dot(ray_dir_unit, parent_3d)
+    c = np.dot(parent_3d, parent_3d) - bone_length_cm ** 2
+    disc = b * b - 4 * a * c
+    if disc < 0:
+        return None  # 2D observation inconsistent with bone length -> noisy frame
+    sq = np.sqrt(disc)
+    t1, t2 = (-b + sq) / (2 * a), (-b - sq) / (2 * a)
+    cand1, cand2 = t1 * ray_dir_unit, t2 * ray_dir_unit
+    if prev_child_3d is not None:
+        d1 = np.linalg.norm(cand1 - prev_child_3d)
+        d2 = np.linalg.norm(cand2 - prev_child_3d)
+        return cand1 if d1 < d2 else cand2
+    return cand1 if cand1[2] > cand2[2] else cand2  # fallback: farther point
+
+
+def get_wrist_depth(landmarks, side, image_width_px, image_height_px,
+                     camera_matrix, torso_center, R, prev_elbow=None, prev_wrist=None):
+    """side: 'L' or 'R'. Returns (elbow_3d, wrist_3d) in camera-frame cm, or (None, None)."""
+    shoulder_idx, elbow_idx, wrist_idx = {'L': (11, 13, 15), 'R': (12, 14, 16)}[side]
+    shoulder_local = MODEL_POINTS[0] if side == 'L' else MODEL_POINTS[1]
+    shoulder_3d = torso_center + R @ shoulder_local
+
+    eu = landmarks[elbow_idx].x * image_width_px
+    ev = landmarks[elbow_idx].y * image_height_px
+    elbow_ray = pixel_to_ray(eu, ev, camera_matrix)
+    elbow_3d = solve_child_depth(shoulder_3d, elbow_ray, UPPER_ARM_CM, prev_elbow)
+    if elbow_3d is None:
+        return None, None
+
+    wu = landmarks[wrist_idx].x * image_width_px
+    wv = landmarks[wrist_idx].y * image_height_px
+    wrist_ray = pixel_to_ray(wu, wv, camera_matrix)
+    wrist_3d = solve_child_depth(elbow_3d, wrist_ray, FOREARM_CM, prev_wrist)
+
+    return elbow_3d, wrist_3d
 #users left and right
 def get_stance(landmarks):
     shoulderL = landmarks[11]
@@ -65,58 +160,6 @@ def get_stance(landmarks):
     return shoulder_x_diff
     return hip_x_diff
     return sideways
-def get_z(landmarks, num):
-#Z = (camera focal length in pixels) x Real World Height / Pixel Height
-# Logitech C310 HD Webcam fixed focal length = 2.33mm
-# height of person in real world = 172.7 cm
-# height of camera is 87.6 mm
-# focal length in pixels is f = (focal length in mm) * (image width in pixels) / (sensor width in mm)
-# focal length in pixels = 2.33 * 480 / 4.29 = 260.5 pixels
-    IMG_X = 640
-    IMG_Y = 360
-    focal_length = 4.4 #mm
-    real_world_height = 172.7 #cm
-    real_world_height = landmarks[num].y
-    return real_world_height 
-
-MODEL_POINTS = np.array([
-    [-20,   0, 0],   # left shoulder
-    [ 20,   0, 0],   # right shoulder
-    [-15, -45, 0],   # left hip
-    [ 15, -45, 0],   # right hip
-], dtype=np.float32)
-
-def get_pose_depth(landmarks, image_width_px, image_height_px, focal_length_px):
-    image_points = np.array([
-        [landmarks[11].x * image_width_px, landmarks[11].y * image_height_px],
-        [landmarks[12].x * image_width_px, landmarks[12].y * image_height_px],
-        [landmarks[23].x * image_width_px, landmarks[23].y * image_height_px],
-        [landmarks[24].x * image_width_px, landmarks[24].y * image_height_px],
-    ], dtype=np.float32)
-
-    cx, cy = image_width_px / 2, image_height_px / 2
-    camera_matrix = np.array([
-        [focal_length_px, 0, cx],
-        [0, focal_length_px, cy],
-        [0, 0, 1]
-    ], dtype=np.float32)
-    dist_coeffs = np.zeros(4, dtype=np.float32)  # assume negligible lens distortion
-
-    success, rvec, tvec = cv2.solvePnP(
-        MODEL_POINTS, image_points, camera_matrix, dist_coeffs)
-    if not success:
-        return None
-    return tvec  # tvec[2][0] is depth (cm) of torso center from camera
-
-def camera_to_world(tvec, camera_height_cm, tilt_deg):
-    x_c, y_c, z_c = tvec.flatten()
-    theta = math.radians(tilt_deg)
-
-    world_x = x_c
-    world_z = z_c * math.cos(theta) - y_c * math.sin(theta)   # distance along ground
-    world_y = camera_height_cm - (z_c * math.sin(theta) + y_c * math.cos(theta))  # height off ground
-
-    return world_x, world_y, world_z
 
 def get_stance_features(landmarks):
     shoulderL = landmarks[11]
