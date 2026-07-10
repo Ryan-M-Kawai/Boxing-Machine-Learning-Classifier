@@ -8,6 +8,7 @@ __pycache__/
 # ── Virtual environment ─────────────────────────────────
 venv/
 env/
+mediapipe_env/
 .venv/
 
 # ── MediaPipe model files (large, third-party, download separately) ──
