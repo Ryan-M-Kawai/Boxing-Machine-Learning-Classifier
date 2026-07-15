@@ -7,8 +7,9 @@ from mediapipe.tasks.python import vision
 import time
 from helper_functions import get_landmark_coordinates, angle, draw_debug 
 from punches import hands_up, stance, punch
+from get_z import test_z
 import json
-from get_values import extract_features, get_stance, get_stance_features, test_z
+from get_values import extract_features, get_stance, get_stance_features
 from collections import deque
 
 BaseOptions = mp.tasks.BaseOptions
@@ -183,7 +184,7 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             cv2.putText(frame, f"Reps saved: {len(training_data)}  |  press label key then S to save",
                         (10, h - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-        cv2.putText(frame, "q=jab w=cross e=r.hook r=l.hook t=r.upper y=l.upper 1=southpaw 2=orthodox p = print features  S=save Q=quit",
+        cv2.putText(frame, "q=jab w=cross e=r.hook r=l.hook t=r.upper y=l.upper 1=southpaw 2=orthodox p = print features  S=save x=quit",
                     (10, h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
         cv2.imshow('Collect Data', frame)
 
