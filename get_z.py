@@ -44,25 +44,16 @@ def get_person_distance_cm(landmarks, image_width_px, image_height_px, focal_len
         return None
     return (REAL_WORLD_HEIGHT_CM * focal_length_px) / apparent_height_px
 
-
-# def solve_child_depth(parent_3d, ray_dir_unit, bone_length_cm, prev_child_3d=None):
-#     """Intersect a camera ray with a sphere of known radius around the parent joint."""
-#     a = np.dot(ray_dir_unit, ray_dir_unit)
-#     b = -2 * np.dot(ray_dir_unit, parent_3d)
-#     c = np.dot(parent_3d, parent_3d) - bone_length_cm ** 2
-#     disc = b * b - 4 * a * c
-#     if disc < 0:
-#         return None  # bone-length constraint inconsistent with this frame — skip it
-#     sq = np.sqrt(disc)
-#     t1, t2 = (-b + sq) / (2 * a), (-b - sq) / (2 * a)
-#     cand1, cand2 = t1 * ray_dir_unit, t2 * ray_dir_unit
-#     if prev_child_3d is not None:
-#         return cand1 if np.linalg.norm(cand1 - prev_child_3d) < np.linalg.norm(cand2 - prev_child_3d) else cand2
-#     return cand1 if cand1[2] > cand2[2] else cand2
 _prev_elbow_R = None
 _prev_wrist_R = None
 _last_valid_extension_R = None
 _smoothed_extension_R = None
+
+_prev_elbow_L = None
+_prev_wrist_L = None
+_last_valid_extension_L = None
+_smoothed_extension_L = None
+
 MAX_PLAUSIBLE_DELTA_CM = 15  # tune by testing normal punches
 
 def solve_child_depth(parent_3d, ray_dir_unit, bone_length_cm, prev_child_3d=None):
@@ -146,30 +137,31 @@ def get_shoulder_z(landmarks, side, image_width_px, image_height_px, focal_lengt
     shoulder_3d = shoulder_ray * (person_z / shoulder_ray[2])
 
     return shoulder_3d[2], shoulder_3d
+
 def reject_implausible(new_value, prev_value):
     if prev_value is not None and new_value is not None:
         if abs(new_value - prev_value) > MAX_PLAUSIBLE_DELTA_CM:
             return prev_value  # discard, treat as if this frame didn't happen
     return new_value
-def smooth_extension(new_value, alpha=0.4):
-    global _smoothed_extension_R
+
+def smooth_extension(new_value, prev_smoothed, alpha=0.4):
+    """Returns the new smoothed value — caller is responsible for storing it
+    back into their own side-specific variable."""
     if new_value is None:
-        return _smoothed_extension_R
-    if _smoothed_extension_R is None:
-        _smoothed_extension_R = new_value
-    else:
-        _smoothed_extension_R = alpha * new_value + (1 - alpha) * _smoothed_extension_R
-    return _smoothed_extension_R
-def test_z(landmarks):
-    global _prev_elbow_R, _prev_wrist_R, _last_valid_extension_R
+        return prev_smoothed
+    if prev_smoothed is None:
+        return new_value
+    return alpha * new_value + (1 - alpha) * prev_smoothed
+
+def shoulder_to_wrist_R(landmarks):
+    global _prev_elbow_R, _prev_wrist_R, _last_valid_extension_R, _smoothed_extension_R
 
     shoulder_z_R, shoulder_3d = get_shoulder_z(landmarks, 'R', 432, 368, FOCAL_LENGTH_PX)
 
     result = get_wrist_z(landmarks, 'R', 432, 368, FOCAL_LENGTH_PX, _prev_elbow_R, _prev_wrist_R)
     if not isinstance(result, tuple) or len(result) != 3:
-        # geometry failed entirely this frame — smooth() with None just
-        # returns the last smoothed value, keeping the signal steady
-        return smooth_extension(None)
+        _smoothed_extension_R = smooth_extension(None, _smoothed_extension_R)
+        return _smoothed_extension_R
 
     wrist_z_R, elbow_3d, wrist_3d = result
 
@@ -179,13 +171,40 @@ def test_z(landmarks):
         _prev_wrist_R = wrist_3d
 
     if wrist_z_R is None or shoulder_z_R is None:
-        return smooth_extension(None)
+        _smoothed_extension_R = smooth_extension(None, _smoothed_extension_R)
+        return _smoothed_extension_R
 
-    # positive = wrist is closer to camera than shoulder (punching forward)
     raw_extension = shoulder_z_R - wrist_z_R
-
-    # reject implausible frame-to-frame jumps before they ever reach smoothing
     raw_extension = reject_implausible(raw_extension, _last_valid_extension_R)
     _last_valid_extension_R = raw_extension
 
-    return smooth_extension(raw_extension)
+    _smoothed_extension_R = smooth_extension(raw_extension, _smoothed_extension_R)
+    return _smoothed_extension_R
+
+def shoulder_to_wrist_L(landmarks):
+    global _prev_elbow_L, _prev_wrist_L, _last_valid_extension_L, _smoothed_extension_L
+
+    shoulder_z_L, shoulder_3d = get_shoulder_z(landmarks, 'L', 432, 368, FOCAL_LENGTH_PX)
+
+    result = get_wrist_z(landmarks, 'L', 432, 368, FOCAL_LENGTH_PX, _prev_elbow_L, _prev_wrist_L)
+    if not isinstance(result, tuple) or len(result) != 3:
+        _smoothed_extension_L = smooth_extension(None, _smoothed_extension_L)
+        return _smoothed_extension_L
+
+    wrist_z_L, elbow_3d, wrist_3d = result
+
+    if elbow_3d is not None:
+        _prev_elbow_L = elbow_3d
+    if wrist_3d is not None:
+        _prev_wrist_L = wrist_3d
+
+    if wrist_z_L is None or shoulder_z_L is None:
+        _smoothed_extension_L = smooth_extension(None, _smoothed_extension_L)
+        return _smoothed_extension_L
+
+    raw_extension = shoulder_z_L - wrist_z_L
+    raw_extension = reject_implausible(raw_extension, _last_valid_extension_L)
+    _last_valid_extension_L = raw_extension
+
+    _smoothed_extension_L = smooth_extension(raw_extension, _smoothed_extension_L)
+    return _smoothed_extension_L

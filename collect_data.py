@@ -7,11 +7,10 @@ from mediapipe.tasks.python import vision
 import time
 from helper_functions import get_landmark_coordinates, angle, draw_debug 
 from punches import hands_up, stance, punch
-from get_z import test_z
-import json
+from get_z import shoulder_to_wrist_L, shoulder_to_wrist_R
 from get_values import extract_features, get_stance, get_stance_features
 from collections import deque
-
+import json
 BaseOptions = mp.tasks.BaseOptions
 PoseLandmarker = mp.tasks.vision.PoseLandmarker
 PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
@@ -64,6 +63,18 @@ frame_buffer = []
 
 #for stances
 stance_history = deque(maxlen=10)
+stance_recording = False
+current_stance_label = None
+last_stance_save = 0
+STANCE_SAVE_INTERVAL = 2.0  # seconds
+
+try:
+    with open('stance_data.json') as f:
+        stance_data = json.load(f)
+    print(f"[LOADED] {len(stance_data)} existing stance samples from stance_data.json")
+except FileNotFoundError:
+    stance_data = []
+    print("[NEW] No existing stance data found, starting fresh")
 try:
     with open('training_data.json') as f:
         training_data = json.load(f)
@@ -154,20 +165,30 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             hip_x_diff = abs(hipL.x - hipR.x)
             sideways = shoulder_x_diff < 0.13 and hip_x_diff < 0.10
 
-            stance_color = (0, 255, 0) if "orthodox" in stance_msg else (255, 0, 255)
+            # stance_color = (0, 255, 0) if "orthodox" in stance_msg else (255, 0, 255)
             #draw_debug(frame, f"{stance_msg} | sw:{shoulder_x_diff:.2f} hw:{hip_x_diff:.2f} side:{sideways}", 1, stance_color)
             
+            direction = get_stance(landmarks)
+            if direction == 0:
+                draw_debug(frame, f"right facing", 1, (0, 255, 0))
+            elif direction == 1:
+                draw_debug(frame, f"left facing", 1, (0, 255, 0))
+
             guard_msg = hands_up(landmarks)
             guard_color = (0,255,0) if guard_msg == "good gaurd" else (0,0,255)
             draw_debug(frame, guard_msg, 3, guard_color)
 
            
-            wrist_z_R = test_z(landmarks)
+            wrist_z_R = shoulder_to_wrist_R(landmarks)
             if wrist_z_R is not None:
                 draw_debug(frame, f"wrist_z: {wrist_z_R:.2f} cm", 4, (255, 255, 0))
             else:
                 draw_debug(frame, "wrist_z: no reading", 4, (0, 0, 255))
-
+            wrist_z_L = shoulder_to_wrist_L(landmarks)
+            if wrist_z_L is not None:
+                draw_debug(frame, f"wrist_z: {wrist_z_L:.2f} cm", 5, (255, 255, 0))
+            else:
+                draw_debug(frame, "wrist_z: no reading", 5, (0, 0, 255))
                 
             features = extract_features(landmarks)
             stance_features = get_stance_features(landmarks)
@@ -184,7 +205,7 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             cv2.putText(frame, f"Reps saved: {len(training_data)}  |  press label key then S to save",
                         (10, h - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-        cv2.putText(frame, "q=jab w=cross e=r.hook r=l.hook t=r.upper y=l.upper 1=southpaw 2=orthodox p = print features  S=save x=quit",
+        cv2.putText(frame, "q=jab w=cross e=r.hook r=l.hook t=r.upper y=l.upper 1=southpaw 0=orthodox p = print features  S=save x=quit",
                     (10, h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
         cv2.imshow('Collect Data', frame)
 
@@ -206,10 +227,29 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             recording = True
             print(f"[LABEL] Recording: {current_label}")
     #    #new ---------------------------------------------------
-    #     elif key in STANCES:
-    #         current_label = STANCES[key]
-    #         stance_recording = True
-    #         printf(f"Recording:{current_label}")
+        elif key in STANCES:
+            if latest_result and latest_result.pose_landmarks:
+                landmarks = latest_result.pose_landmarks[0]
+                label = STANCES[key]
+                features = get_stance_features(landmarks)
+
+                stance_data.append({
+                    'label': label,
+                    'features': [round(v, 5) for v in features]
+                })
+
+                with open('stance_data.json', 'w') as f:
+                    json.dump(stance_data, f, indent=2)
+
+                print(f"[STANCE SAVED] #{len(stance_data)} — {label}: "
+                    f"{[round(v, 3) for v in features]}")
+
+                from collections import Counter
+                counts = Counter(d['label'] for d in stance_data)
+                for lbl, count in sorted(counts.items()):
+                    print(f"    {lbl}: {count} samples")
+            else:
+                print("[WARN] No pose detected — can't snapshot stance")
     #     #-----------------------------------------------------
         elif key == ord('s'):
             if not recording:

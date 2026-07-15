@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 from helper_functions import angle, lm_to_list, lm_to_list_2d
-from get_z import FOCAL_LENGTH_PX, get_wrist_z, get_shoulder_z
+from get_z import FOCAL_LENGTH_PX, shoulder_to_wrist_R, shoulder_to_wrist_L
 import math
 # Logitech C310 HD Webcam fixed focal length = 2.33mm
 # height of person in real world = 172.7 cm
@@ -12,35 +12,6 @@ image_width_px = 640
 image_height_px = 360
 #users left and right
 # module-level, outside any function — persists across frames
-_prev_elbow_R = None
-_prev_wrist_R = None
-_last_valid_extension_R = None
-_smoothed_extension_R = None
-MAX_PLAUSIBLE_DELTA_CM = 15  # tune by testing normal punches
-
-# def test_z(landmarks):
-#     global _prev_elbow_R, _prev_wrist_R, _last_valid_extension_R
-
-#     shoulder_z_R, shoulder_3d = get_shoulder_z(landmarks, 'R', 432, 368, FOCAL_LENGTH_PX)
-
-#     result = get_wrist_z(landmarks, 'R', 432, 368, FOCAL_LENGTH_PX, _prev_elbow_R, _prev_wrist_R)
-#     if not isinstance(result, tuple) or len(result) != 3:
-#         return _last_valid_extension_R
-
-#     wrist_z_R, elbow_3d, wrist_3d = result
-
-#     if elbow_3d is not None:
-#         _prev_elbow_R = elbow_3d
-#     if wrist_3d is not None:
-#         _prev_wrist_R = wrist_3d
-
-#     if wrist_z_R is not None and shoulder_z_R is not None:
-#         # positive = wrist is closer to camera than shoulder (punching forward)
-#         extension = shoulder_z_R - wrist_z_R
-#         _last_valid_extension_R = extension
-#         return extension
-
-#     return _last_valid_extension_R
 
 
 def get_stance(landmarks):
@@ -101,10 +72,10 @@ def get_stance(landmarks):
             stance = 1
     #talk abt k maps
     #0 = orthodox, 1 = southpaw
-    return stance
-    return shoulder_x_diff
-    return hip_x_diff
-    return sideways
+    #return stance
+    #return shoulder_x_diff
+    #return hip_x_diff
+    return shoulder_z_diff_bool
 
 def get_stance_features(landmarks):
     shoulderL = landmarks[11]
@@ -178,11 +149,11 @@ def extract_features(landmarks):
     wristRextension_horz = (wristR.x - shoulderMidX) / (shoulder_width + 1e-6)
 
     elbowHeightL = (shoulderL.y - elbowL.y) / body_height
-    elbowHeightR = (shoulderR.y - elbowR.y) / body_height
+    elbowHeightR = (shoulderR.y - elbowR.y) / body_height   
 
     #forward punching
-    wristLextension_forward = wristL.z - shoulderL.z
-    wristRextension_forward = wristR.z - shoulderR.z
+    wristLextension_forward = shoulder_to_wrist_L(landmarks)
+    wristRextension_forward = shoulder_to_wrist_R(landmarks)
     wrist_foot_extensionL = wristL.z - shinL.z
     wrist_foot_extensionR = wristR.z - shinR.z
 
