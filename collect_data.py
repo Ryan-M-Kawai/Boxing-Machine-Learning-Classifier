@@ -8,7 +8,7 @@ import time
 from helper_functions import get_landmark_coordinates, angle, draw_debug 
 from punches import hands_up, stance, punch
 import json
-from get_values import extract_features, get_stance, get_stance_features
+from get_values import extract_features, get_stance, get_stance_features, test_z
 from collections import deque
 
 BaseOptions = mp.tasks.BaseOptions
@@ -20,6 +20,7 @@ VisionRunningMode = mp.tasks.vision.RunningMode
 POSE_CONNECTIONS = [
     #persons direction, mirrored to viewers left and right
     (11,13), #left bicep
+    (11,12), #shoulders
     (13,15), #left forearm
     (12,14), #right bicep
     (14,16), #right forearm
@@ -51,7 +52,9 @@ latest_result = None
 min_detection_confidence = 0.3
 min_tracking_confidence = 0.6
 timestamp_ms = int(time.time() * 1000)
-
+#img with and height
+img_width = 640
+img_height = 360
 #timer
 print_timer_start = None  # add to globals at top
 
@@ -74,19 +77,16 @@ recording = False
 #p and s already taken
 LABELS = {
     #from watcher left and right
-    ord('j'): 'jab', 
-    ord('c'): 'cross', 
-    ord('h'): 'right_hook',
-    ord('k'): 'left_hook', 
-    ord('u'): 'right_uppercut',
+    ord('q'): 'jab', 
+    ord('w'): 'cross', 
+    ord('e'): 'right_hook',
+    ord('r'): 'left_hook', 
+    ord('t'): 'right_uppercut',
     ord('y'): 'left_uppercut',
-    ord('g'): 'guard',
-    ord('e'): 'left_elbow',
-    ord('r'): 'right_elbow'
 }
 STANCES = {
     ord('0'): 'orthodox',
-    ord('1'): 'so'
+    ord('1'): 'southpaw'
 } 
 
 def print_result(result:PoseLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
@@ -114,7 +114,7 @@ with PoseLandmarker.create_from_options(options) as landmarker:
 
         #wrap in Mediapipe Image and send to landmarker    
         #aspect ratio of camera is 1280 x 720
-        small_frame = cv2.resize(rgb_frame, (640, 360))  
+        small_frame = cv2.resize(rgb_frame, (img_width, img_height))  
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data = small_frame)
 
         timestamp_ms +=1
@@ -154,12 +154,20 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             sideways = shoulder_x_diff < 0.13 and hip_x_diff < 0.10
 
             stance_color = (0, 255, 0) if "orthodox" in stance_msg else (255, 0, 255)
-            draw_debug(frame, f"{stance_msg} | sw:{shoulder_x_diff:.2f} hw:{hip_x_diff:.2f} side:{sideways}", 1, stance_color)
+            #draw_debug(frame, f"{stance_msg} | sw:{shoulder_x_diff:.2f} hw:{hip_x_diff:.2f} side:{sideways}", 1, stance_color)
             
             guard_msg = hands_up(landmarks)
             guard_color = (0,255,0) if guard_msg == "good gaurd" else (0,0,255)
             draw_debug(frame, guard_msg, 3, guard_color)
 
+           
+            wrist_z_R = test_z(landmarks)
+            if wrist_z_R is not None:
+                draw_debug(frame, f"wrist_z: {wrist_z_R:.2f} cm", 4, (255, 255, 0))
+            else:
+                draw_debug(frame, "wrist_z: no reading", 4, (0, 0, 255))
+
+                
             features = extract_features(landmarks)
             stance_features = get_stance_features(landmarks)
 
@@ -175,10 +183,8 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             cv2.putText(frame, f"Reps saved: {len(training_data)}  |  press label key then S to save",
                         (10, h - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-        cv2.putText(frame, "j=jab c=cross h=r.hook k=l.hook u=r.upper y=l.upper g=guard n=none p = print features  S=save Q=quit",
+        cv2.putText(frame, "q=jab w=cross e=r.hook r=l.hook t=r.upper y=l.upper 1=southpaw 2=orthodox p = print features  S=save Q=quit",
                     (10, h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
-        cv2.putText(frame, "e=l.elbow r=r.elbow",
-                    (10, h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
         cv2.imshow('Collect Data', frame)
 
         # ── Keypress handling ──────────────────────────────
@@ -206,7 +212,7 @@ with PoseLandmarker.create_from_options(options) as landmarker:
     #     #-----------------------------------------------------
         elif key == ord('s'):
             if not recording:
-                print("[WARN] Press a label key first (j/c/h/k/u/y/g/n)")
+                print("[WARN] Press a label key first (q/w/e/r/t/y/1/2) to start recording")
             elif len(frame_buffer) < 30:
                 print(f"[WARN] Buffer only {len(frame_buffer)}/30 frames — hold the pose longer")
             #elif stance_recording == True:
@@ -252,7 +258,7 @@ with PoseLandmarker.create_from_options(options) as landmarker:
         elif key == ord('p'):
             print_timer_start = time.time()
             print("snap shot in 3")
-        elif key == ord('q'):
+        elif key == ord('x'):
             if training_data:
                 with open('training_data.json', 'w') as f:
                     json.dump(training_data, f, indent= 2)
