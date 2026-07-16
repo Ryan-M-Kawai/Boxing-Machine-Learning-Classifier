@@ -8,7 +8,7 @@ import time
 from helper_functions import get_landmark_coordinates, angle, draw_debug 
 from punches import hands_up, stance, punch
 from get_z import shoulder_to_wrist_L, shoulder_to_wrist_R
-from get_values import extract_features, get_stance, get_stance_features
+from get_values import direction_facing, extract_features, get_stance, get_stance_features
 from collections import deque
 import json
 BaseOptions = mp.tasks.BaseOptions
@@ -110,7 +110,7 @@ options = PoseLandmarkerOptions(
     running_mode=VisionRunningMode.LIVE_STREAM,
     result_callback = print_result)
 
-cap = cv2.VideoCapture(1) #try 1 or 2
+cap = cv2.VideoCapture(0) #try 1 or 2
 timestamp_ms = 0
 
 with PoseLandmarker.create_from_options(options) as landmarker:
@@ -153,27 +153,17 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             stance_history.append(get_stance(landmarks))
             smoothed_stance = max(set(stance_history), key=stance_history.count)
 
-            if smoothed_stance == 0:
-                stance_msg = "orthodox "
-            elif smoothed_stance == 1:
-                stance_msg = "southpaw"
-            shoulderL = landmarks[11]
-            shoulderR = landmarks[12]
-            hipL = landmarks[23]
-            hipR = landmarks[24]
-            shoulder_x_diff = abs(shoulderL.x - shoulderR.x)
-            hip_x_diff = abs(hipL.x - hipR.x)
-            sideways = shoulder_x_diff < 0.13 and hip_x_diff < 0.10
+            # shoulder_x_diff = abs(shoulderL.x - shoulderR.x)
+            # hip_x_diff = abs(hipL.x - hipR.x)
+            # sideways = shoulder_x_diff < 0.11 and hip_x_diff < 0.11
 
-            # stance_color = (0, 255, 0) if "orthodox" in stance_msg else (255, 0, 255)
-            #draw_debug(frame, f"{stance_msg} | sw:{shoulder_x_diff:.2f} hw:{hip_x_diff:.2f} side:{sideways}", 1, stance_color)
-            
-            direction = get_stance(landmarks)
+            direction = direction_facing(landmarks)
             if direction == 0:
                 draw_debug(frame, f"right facing", 1, (0, 255, 0))
             elif direction == 1:
                 draw_debug(frame, f"left facing", 1, (0, 255, 0))
-
+            else:
+                draw_debug(frame, f"forwards", 1, (0, 0, 255))
             guard_msg = hands_up(landmarks)
             guard_color = (0,255,0) if guard_msg == "good gaurd" else (0,0,255)
             draw_debug(frame, guard_msg, 3, guard_color)

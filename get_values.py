@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 from helper_functions import angle, lm_to_list, lm_to_list_2d
-from get_z import FOCAL_LENGTH_PX, shoulder_to_wrist_R, shoulder_to_wrist_L
+from get_z import FOCAL_LENGTH_PX, shoulder_to_wrist_R, shoulder_to_wrist_L, get_shoulder_z
 import math
 # Logitech C310 HD Webcam fixed focal length = 2.33mm
 # height of person in real world = 172.7 cm
@@ -56,7 +56,7 @@ def get_stance(landmarks):
     shoulder_x_diff = abs(shoulderL.x - shoulderR.x) 
     hip_x_diff = abs(hipL.x-hipR.x)
     
-    sideways = shoulder_x_diff <0.15 and hip_x_diff <0.15
+    sideways = shoulder_x_diff <0.11 and hip_x_diff <0.11
     #print(f"foot_z_diff: {foot_z_diff:.3f}  shoulder_z_diff: {shoulder_z_diff:.3f}  sideways: {sideways}")
     if sideways == 1:
         #print("side")
@@ -76,6 +76,63 @@ def get_stance(landmarks):
     #return shoulder_x_diff
     #return hip_x_diff
     return shoulder_z_diff_bool
+def direction_facing(landmarks):
+    #just return if sideways or not, 0 = right, 1 = left
+    # shoulderL = landmarks[11]
+    # shoulderR = landmarks[12]
+    # footL = landmarks[31]
+    # footR = landmarks[32]
+    # hipL = landmarks[23]
+    # hipR = landmarks[24]
+    # wristL = landmarks[15]
+    # wristR = landmarks[16]
+    # direction = None
+    # shoulder_x_diff = abs(shoulderL.x - shoulderR.x) 
+    # hip_x_diff = abs(hipL.x-hipR.x)
+    # leg_x_diff = footL.x - footR.x
+    # shoulder_z_diff = shoulderL.z- shoulderR.z
+    # shoulder_mid_y = (shoulderL.y + shoulderR.y) / 2
+    # hip_mid_y = (hipL.y + hipR.y) / 2
+    # torso_height = abs(hip_mid_y - shoulder_mid_y) + 1e-6  # avoid div by zero
+
+    # shoulder_ratio = shoulder_x_diff / torso_height
+    # hip_ratio = hip_x_diff / torso_height
+
+    # sideways = shoulder_ratio < 0.5 and hip_ratio < 0.5
+
+    # hands_right = wristR.x > shoulderR.x and wristL.x > shoulderL.x
+    # hands_left = wristL.x < shoulderL.x and wristR.x < shoulderR.x
+    # if sideways:
+    #     if shoulder_z_diff <= 0 and leg_x_diff >=0 and hands_right:
+    #         direction = 0 #right
+    #     elif shoulder_z_diff > 0 and leg_x_diff <=0 and hands_left:
+    #         direction = 1 #left
+    # else:
+    #     direction = 2 #forwards
+
+    # 0 = right, 1 = left, 2 = forward
+    shoulderL = landmarks[11]
+    shoulderR = landmarks[12]
+    hipL = landmarks[23]
+    hipR = landmarks[24]
+
+    shoulder_x_diff = abs(shoulderL.x - shoulderR.x)
+    hip_x_diff = abs(hipL.x - hipR.x)
+    shoulder_z_diff = shoulderL.z - shoulderR.z
+
+    shoulder_mid_y = (shoulderL.y + shoulderR.y) / 2
+    hip_mid_y = (hipL.y + hipR.y) / 2
+    torso_height = abs(hip_mid_y - shoulder_mid_y) + 1e-6
+
+    shoulder_ratio = shoulder_x_diff / torso_height
+    hip_ratio = hip_x_diff / torso_height
+
+    sideways = shoulder_ratio < 0.3 and hip_ratio < 0.3
+    if sideways:
+        direction = 0 if shoulder_z_diff <= 0 else 1
+    else:
+        direction = 2
+    return direction
 
 def get_stance_features(landmarks):
     shoulderL = landmarks[11]
@@ -90,15 +147,19 @@ def get_stance_features(landmarks):
 
     shoulder_x_diff = shoulderL.x - shoulderR.x
     shoulder_z_diff = shoulderL.z - shoulderR.z
-
+    wristLextension_forward = shoulder_to_wrist_L(landmarks)
+    wristRextension_forward = shoulder_to_wrist_R(landmarks)
     hip_x_diff = hipL.x - hipR.x
-
+    direction = direction_facing(landmarks)
     return [
         foot_x_diff,
         foot_z_diff,
         shoulder_x_diff,
         shoulder_z_diff,
-        hip_x_diff
+        wristLextension_forward,
+        wristRextension_forward,
+        hip_x_diff,
+        direction
     ]
 
 
