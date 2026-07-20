@@ -147,8 +147,7 @@ def get_stance_features(landmarks):
 
     shoulder_x_diff = shoulderL.x - shoulderR.x
     shoulder_z_diff = shoulderL.z - shoulderR.z
-    wristLextension_forward = shoulder_to_wrist_L(landmarks)
-    wristRextension_forward = shoulder_to_wrist_R(landmarks)
+
     hip_x_diff = hipL.x - hipR.x
     direction = direction_facing(landmarks)
     return [
@@ -156,8 +155,6 @@ def get_stance_features(landmarks):
         foot_z_diff,
         shoulder_x_diff,
         shoulder_z_diff,
-        wristLextension_forward,
-        wristRextension_forward,
         hip_x_diff,
         direction
     ]
