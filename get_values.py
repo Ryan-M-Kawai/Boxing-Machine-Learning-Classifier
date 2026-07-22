@@ -77,38 +77,7 @@ def get_stance(landmarks):
     #return hip_x_diff
     return shoulder_z_diff_bool
 def direction_facing(landmarks):
-    #just return if sideways or not, 0 = right, 1 = left
-    # shoulderL = landmarks[11]
-    # shoulderR = landmarks[12]
-    # footL = landmarks[31]
-    # footR = landmarks[32]
-    # hipL = landmarks[23]
-    # hipR = landmarks[24]
-    # wristL = landmarks[15]
-    # wristR = landmarks[16]
-    # direction = None
-    # shoulder_x_diff = abs(shoulderL.x - shoulderR.x) 
-    # hip_x_diff = abs(hipL.x-hipR.x)
-    # leg_x_diff = footL.x - footR.x
-    # shoulder_z_diff = shoulderL.z- shoulderR.z
-    # shoulder_mid_y = (shoulderL.y + shoulderR.y) / 2
-    # hip_mid_y = (hipL.y + hipR.y) / 2
-    # torso_height = abs(hip_mid_y - shoulder_mid_y) + 1e-6  # avoid div by zero
 
-    # shoulder_ratio = shoulder_x_diff / torso_height
-    # hip_ratio = hip_x_diff / torso_height
-
-    # sideways = shoulder_ratio < 0.5 and hip_ratio < 0.5
-
-    # hands_right = wristR.x > shoulderR.x and wristL.x > shoulderL.x
-    # hands_left = wristL.x < shoulderL.x and wristR.x < shoulderR.x
-    # if sideways:
-    #     if shoulder_z_diff <= 0 and leg_x_diff >=0 and hands_right:
-    #         direction = 0 #right
-    #     elif shoulder_z_diff > 0 and leg_x_diff <=0 and hands_left:
-    #         direction = 1 #left
-    # else:
-    #     direction = 2 #forwards
 
     # 0 = right, 1 = left, 2 = forward
     shoulderL = landmarks[11]
@@ -127,7 +96,7 @@ def direction_facing(landmarks):
     shoulder_ratio = shoulder_x_diff / torso_height
     hip_ratio = hip_x_diff / torso_height
 
-    sideways = shoulder_ratio < 0.3 and hip_ratio < 0.3
+    sideways = shoulder_ratio < 0.3 and hip_ratio < 0.27
     if sideways:
         direction = 0 if shoulder_z_diff <= 0 else 1
     else:
@@ -141,24 +110,30 @@ def get_stance_features(landmarks):
     footR = landmarks[32]
     hipL = landmarks[23]
     hipR = landmarks[24]
-    
-    foot_x_diff = footL.x - footR.x
-    foot_z_diff = footL.z - footR.z
 
-    shoulder_x_diff = shoulderL.x - shoulderR.x
-    shoulder_z_diff = shoulderL.z - shoulderR.z
+    shoulder_width = np.linalg.norm([shoulderL.x - shoulderR.x, shoulderL.y - shoulderR.y]) + 1e-6
+    hip_width = np.linalg.norm([hipL.x - hipR.x, hipL.y - hipR.y]) + 1e-6
 
-    hip_x_diff = hipL.x - hipR.x
+    foot_x_diff     = (footL.x - footR.x) / shoulder_width
+    foot_z_diff     = (footL.z - footR.z) / shoulder_width
+    shoulder_x_diff = (shoulderL.x - shoulderR.x) / shoulder_width
+    shoulder_z_diff = (shoulderL.z - shoulderR.z) / shoulder_width
+    hip_x_diff      = (hipL.x - hipR.x) / hip_width
+    hip_z_diff      = (hipL.z - hipR.z) / hip_width  # you use this in get_stance() but weren't feeding it to the model
+
     direction = direction_facing(landmarks)
-    return [
-        foot_x_diff,
-        foot_z_diff,
-        shoulder_x_diff,
-        shoulder_z_diff,
-        hip_x_diff,
-        direction
-    ]
+    sign = 1.0 if direction == 0 else -1.0  # flip based on which way they're facing
 
+    # canonicalized (sign-corrected) versions — same meaning regardless of camera-facing direction
+    foot_x_diff_canon     = foot_x_diff * sign
+    shoulder_z_diff_canon = shoulder_z_diff * sign
+    hip_z_diff_canon      = hip_z_diff * sign
+
+    return [
+        foot_x_diff, foot_z_diff, shoulder_x_diff, shoulder_z_diff, hip_x_diff, hip_z_diff,
+        direction,
+        foot_x_diff_canon, shoulder_z_diff_canon, hip_z_diff_canon,
+    ]
 
 
 def extract_features(landmarks):

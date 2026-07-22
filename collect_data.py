@@ -5,13 +5,14 @@ import numpy as np #2.2.6
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import time
-from helper_functions import get_landmark_coordinates, angle, draw_debug 
+from helper_functions import get_landmark_coordinates, angle, draw_debug, resize_window_to_screen
 from punches import hands_up, stance, punch
-from get_z import shoulder_to_wrist_L, shoulder_to_wrist_R
-from get_values import direction_facing, extract_features, get_stance, get_stance_features
-from collections import deque
 import json
-import pylance
+from get_values import extract_features, get_stance, get_stance_features
+from get_z import shoulder_to_wrist_R, shoulder_to_wrist_L
+from collections import deque
+import pyautogui
+
 BaseOptions = mp.tasks.BaseOptions
 PoseLandmarker = mp.tasks.vision.PoseLandmarker
 PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
@@ -53,9 +54,10 @@ latest_result = None
 min_detection_confidence = 0.3
 min_tracking_confidence = 0.6
 timestamp_ms = int(time.time() * 1000)
+
 #img with and height
-img_width = 640
-img_height = 360
+#16:9 aspect ratio
+
 #timer
 print_timer_start = None  # add to globals at top
 
@@ -64,23 +66,18 @@ frame_buffer = []
 
 #for stances
 stance_history = deque(maxlen=10)
+
+# for orientation (frontal vs sideways) — smoothed so a single flickery
+# frame doesn't misroute a rep into the wrong training file
+direction_history = deque(maxlen=10)
+current_sideways = False
+
+# stance snapshot recording (toggle on/off with STANCES keys)
 stance_recording = False
-current_stance_label = None
-last_stance_save = 0
-STANCE_SAVE_INTERVAL = 2.0  # seconds
+stance_record_label = None
+last_stance_capture_time = 0
+STANCE_CAPTURE_INTERVAL = 1.0  # seconds
 
-# ── NEW: orientation tracking for frontal/sideways split ────
-direction_history = deque(maxlen=10)   # smooths direction_facing() over recent frames
-current_direction = 2                  # 0=right facing, 1=left facing, 2/other=forwards
-current_sideways  = False              # True when current_direction is 0 or 1
-
-try:
-    with open('stance_data.json') as f:
-        stance_data = json.load(f)
-    print(f"[LOADED] {len(stance_data)} existing stance samples from stance_data.json")
-except FileNotFoundError:
-    stance_data = []
-    print("[NEW] No existing stance data found, starting fresh")
 try:
     with open('training_data.json') as f:
         training_data = json.load(f)
@@ -89,7 +86,6 @@ except FileNotFoundError:
     training_data = []
     print("[NEW] No existing data found, starting fresh")
 
-# ── NEW: separate sideways dataset ───────────────────────────
 try:
     with open('sideways_training_data.json') as f:
         sideways_training_data = json.load(f)
@@ -98,13 +94,21 @@ except FileNotFoundError:
     sideways_training_data = []
     print("[NEW] No existing sideways data found, starting fresh")
 
+try:
+    with open('stance_data.json') as f:
+        stance_data = json.load(f)
+    print(f"[LOADED] {len(stance_data)} existing stance samples from stance_data.json")
+except FileNotFoundError:
+    stance_data = []
+    print("[NEW] No existing stance data found, starting fresh")
+
 current_label = None
 recording = False
 
 #p and s already taken
 LABELS = {
     #from watcher left and right
-    ord('q'): 'jab',
+    ord('q'): 'jab', 
     ord('w'): 'cross', 
     ord('e'): 'right_hook',
     ord('r'): 'left_hook', 
@@ -115,36 +119,6 @@ STANCES = {
     ord('0'): 'orthodox',
     ord('1'): 'southpaw'
 } 
-
-# ── NEW: reusable compact writer for either training set ─────
-class CompactEncoder(json.JSONEncoder):
-    def iterencode(self, obj, _one_shot=False):
-        if isinstance(obj, list) and obj and isinstance(obj[0], dict):
-            yield '[\n'
-            for i, rep in enumerate(obj):
-                yield '  {\n'
-                yield f'    "label": "{rep["label"]}",\n'
-                yield '    "frames": [\n'
-                for j, frame in enumerate(rep['frames']):
-                    comma = ',' if j < len(rep['frames']) - 1 else ''
-                    yield f'      {json.dumps([round(v, 3) for v in frame])}{comma}\n'
-                yield '    ]\n'
-                yield '  }' + (',' if i < len(obj) - 1 else '') + '\n'
-            yield ']\n'
-        else:
-            yield from super().iterencode(obj, _one_shot)
-
-def save_dataset(data, path):
-    with open(path, 'w') as f:
-        f.write(CompactEncoder().encode(data))
-
-def print_class_breakdown(data, path_label):
-    from collections import Counter
-    counts = Counter(d['label'] for d in data)
-    print(f"  --- all reps so far ({path_label}) ---")
-    for label, count in sorted(counts.items()):
-        print(f"    {label}: {count} reps")
-    print()
 
 def print_result(result:PoseLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
     global latest_result
@@ -157,9 +131,14 @@ options = PoseLandmarkerOptions(
 
 cap = cv2.VideoCapture(0) #try 1 or 2
 timestamp_ms = 0
+window_width, window_height = resize_window_to_screen(cap)
 
 with PoseLandmarker.create_from_options(options) as landmarker:
+    cv2.namedWindow('Collect Data', cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('Collect Data', window_width, window_height)
+    cv2.moveWindow('Collect Data', 0, 0)  # move to top-left corner of screen
     while cap.isOpened():
+        
         ret, frame = cap.read()
         if not ret:
             print("Ignoring empty camera frame.")
@@ -170,8 +149,12 @@ with PoseLandmarker.create_from_options(options) as landmarker:
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         #wrap in Mediapipe Image and send to landmarker    
-        #aspect ratio of camera is 1280 x 720
-        small_frame = cv2.resize(rgb_frame, (img_width, img_height))  
+        camera_width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+        camera_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        inference_scale = 0.5  # scale down for inference
+        inference_width = int(camera_width * inference_scale)
+        inference_height = int(camera_height * inference_scale)
+        small_frame = cv2.resize(rgb_frame, (inference_width, inference_height))
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data = small_frame)
 
         timestamp_ms +=1
@@ -198,28 +181,24 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             stance_history.append(get_stance(landmarks))
             smoothed_stance = max(set(stance_history), key=stance_history.count)
 
-            # shoulder_x_diff = abs(shoulderL.x - shoulderR.x)
-            # hip_x_diff = abs(hipL.x - hipR.x)
-            # sideways = shoulder_x_diff < 0.11 and hip_x_diff < 0.11
+            if smoothed_stance == 0:
+                stance_msg = "orthodox "
+            elif smoothed_stance == 1:
+                stance_msg = "southpaw"
+            shoulderL = landmarks[11]
+            shoulderR = landmarks[12]
+            hipL = landmarks[23]
+            hipR = landmarks[24]
+            shoulder_x_diff = abs(shoulderL.x - shoulderR.x)
+            hip_x_diff = abs(hipL.x - hipR.x)
+            sideways = shoulder_x_diff < 0.13 and hip_x_diff < 0.10
 
-            direction = direction_facing(landmarks)
-            if direction == 0:
-                draw_debug(frame, f"right facing", 1, (0, 255, 0))
-            elif direction == 1:
-                draw_debug(frame, f"left facing", 1, (0, 255, 0))
-            else:
-                draw_debug(frame, f"forwards", 1, (0, 0, 255))
+            direction_history.append(sideways)
+            current_sideways = max(set(direction_history), key=direction_history.count)
 
-            # ── NEW: smooth direction over recent frames, then derive
-            # a single sideways flag used to route saved reps ──
-            direction_history.append(direction)
-            current_direction = max(set(direction_history), key=direction_history.count)
-            current_sideways = current_direction in (0, 1)
-
-            orient_msg = "SIDEWAYS" if current_sideways else "FRONTAL"
-            orient_color = (255, 0, 255) if current_sideways else (0, 255, 0)
-            draw_debug(frame, orient_msg, 2, orient_color)
-
+            stance_color = (0, 255, 0) if "orthodox" in stance_msg else (255, 0, 255)
+            #draw_debug(frame, f"{stance_msg} | sw:{shoulder_x_diff:.2f} hw:{hip_x_diff:.2f} side:{sideways}", 1, stance_color)
+            
             guard_msg = hands_up(landmarks)
             guard_color = (0,255,0) if guard_msg == "good gaurd" else (0,0,255)
             draw_debug(frame, guard_msg, 3, guard_color)
@@ -235,7 +214,7 @@ with PoseLandmarker.create_from_options(options) as landmarker:
                 draw_debug(frame, f"wrist_z: {wrist_z_L:.2f} cm", 5, (255, 255, 0))
             else:
                 draw_debug(frame, "wrist_z: no reading", 5, (0, 0, 255))
-                
+
             features = extract_features(landmarks)
             stance_features = get_stance_features(landmarks)
 
@@ -243,17 +222,41 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             if len(frame_buffer) > 30:
                 frame_buffer.pop(0)
 
+            # ── Stance snapshot recording (toggled by STANCES keys) ──
+            if stance_recording:
+                now = time.time()
+                if now - last_stance_capture_time >= STANCE_CAPTURE_INTERVAL:
+                    stance_data.append({
+                        'label': stance_record_label,
+                        'features': [round(v, 5) for v in stance_features]
+                    })
+                    last_stance_capture_time = now
+
+                    with open('stance_data.json', 'w') as f:
+                        json.dump(stance_data, f, indent=2)
+
+                    print(f"[STANCE SAVED] #{len(stance_data)} — {stance_record_label}: "
+                          f"{[round(v, 3) for v in stance_features]}")
+
+        orientation_label = "SIDEWAYS" if current_sideways else "FRONTAL"
+        orientation_color = (0, 165, 255) if current_sideways else (0, 255, 0)
+
         if recording:
-            # NEW — label shows which dataset the rep is currently headed to
-            target_name = "sideways_training_data" if current_sideways else "training_data"
-            label_text = f"RECORDING [{target_name}]: {current_label}  |  buffer: {len(frame_buffer)}/30"
+            label_text = f"RECORDING: {current_label}  |  buffer: {len(frame_buffer)}/30  |  {orientation_label}"
             cv2.putText(frame, label_text, (10, h - 60),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         else:
-            cv2.putText(frame, f"Frontal: {len(training_data)}  |  Sideways: {len(sideways_training_data)}  |  press label key then S to save",
+            cv2.putText(frame, f"Frontal reps: {len(training_data)}  |  Sideways reps: {len(sideways_training_data)}  |  press label key then S to save",
                         (10, h - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-        cv2.putText(frame, "q=jab w=cross e=r.hook r=l.hook t=r.upper y=l.upper 1=southpaw 0=orthodox p = print features  S=save x=quit",
+        cv2.putText(frame, orientation_label, (10, h - 100),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, orientation_color, 1)
+
+        if stance_recording:
+            cv2.putText(frame, f"STANCE REC: {stance_record_label}  ({len(stance_data)} samples)  |  press key again to stop",
+                        (10, h - 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
+
+        cv2.putText(frame, "q=jab w=cross e=r.hook r=l.hook t=r.upper y=l.upper 0=orthodox 1=southpaw p=print features S=save X=quit",
                     (10, h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
         cv2.imshow('Collect Data', frame)
 
@@ -274,84 +277,98 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             current_label = LABELS[key]
             recording = True
             print(f"[LABEL] Recording: {current_label}")
-    #    #new ---------------------------------------------------
         elif key in STANCES:
-            if latest_result and latest_result.pose_landmarks:
-                landmarks = latest_result.pose_landmarks[0]
-                label = STANCES[key]
-                features = get_stance_features(landmarks)
-
-                stance_data.append({
-                    'label': label,
-                    'features': [round(v, 5) for v in features]
-                })
-
-                with open('stance_data.json', 'w') as f:
-                    json.dump(stance_data, f, indent=2)
-
-                print(f"[STANCE SAVED] #{len(stance_data)} — {label}: "
-                    f"{[round(v, 3) for v in features]}")
-
-                from collections import Counter
-                counts = Counter(d['label'] for d in stance_data)
-                for lbl, count in sorted(counts.items()):
-                    print(f"    {lbl}: {count} samples")
+            label = STANCES[key]
+            if stance_recording and stance_record_label == label:
+                # pressed again -> stop
+                stance_recording = False
+                print(f"[STANCE] Stopped recording '{label}'. Total samples: {len(stance_data)}")
+                stance_record_label = None
             else:
-                print("[WARN] No pose detected — can't snapshot stance")
-    #     #-----------------------------------------------------
+                # start (or switch label mid-stream)
+                stance_recording = True
+                stance_record_label = label
+                last_stance_capture_time = time.time()
+                print(f"[STANCE] Started recording '{label}' — snapshot every {STANCE_CAPTURE_INTERVAL}s. Press '{key}' again to stop.")
         elif key == ord('s'):
             if not recording:
                 print("[WARN] Press a label key first (q/w/e/r/t/y/1/2) to start recording")
             elif len(frame_buffer) < 30:
                 print(f"[WARN] Buffer only {len(frame_buffer)}/30 frames — hold the pose longer")
-            #elif stance_recording == True:
-                
             else:
-                # ── NEW: route the rep to the correct dataset based on
-                # current_sideways at the moment of save ──
-                if current_sideways:
-                    target_data = sideways_training_data
-                    target_path = 'sideways_training_data.json'
-                else:
-                    target_data = training_data
-                    target_path = 'training_data.json'
+                class CompactEncoder(json.JSONEncoder):
+                    def iterencode(self, obj, _one_shot=False):
+                        if isinstance(obj, list) and obj and isinstance(obj[0], dict):
+                            yield '[\n'
+                            for i, rep in enumerate(obj):
+                                yield '  {\n'
+                                yield f'    "label": "{rep["label"]}",\n'
+                                yield '    "frames": [\n'
+                                for j, frame in enumerate(rep['frames']):
+                                    comma = ',' if j < len(rep['frames']) - 1 else ''
+                                    yield f'      {json.dumps([round(v, 3) for v in frame])}{comma}\n'
+                                yield '    ]\n'
+                                yield '  }' + (',' if i < len(obj) - 1 else '') + '\n'
+                            yield ']\n'
+                        else:
+                            yield from super().iterencode(obj, _one_shot)
 
-                target_data.append({
+                # route the rep based on smoothed camera orientation at save time
+                if current_sideways:
+                    target_list = sideways_training_data
+                    target_path = 'sideways_training_data.json'
+                    orientation_tag = "SIDEWAYS"
+                else:
+                    target_list = training_data
+                    target_path = 'training_data.json'
+                    orientation_tag = "FRONTAL"
+
+                target_list.append({
                     'frames': list(frame_buffer),
                     'label': current_label
                 })
-                print(f"[SAVED to {target_path}] Rep #{len(target_data)} — {current_label}")
-            
-                saved_frames = target_data[-1]['frames']
+                print(f"[SAVED] Rep #{len(target_list)} ({orientation_tag}) — {current_label}  →  {target_path}")
+
+                saved_frames = target_list[-1]['frames']
                 print(f"  label     : {current_label}")
                 print(f"  frames    : {len(saved_frames)}")
                 print(f"  features  : {len(saved_frames[0])}")
-                
-                print_class_breakdown(target_data, target_path)
+
+                print(f"  --- all {orientation_tag.lower()} reps so far ---")
+                from collections import Counter
+                counts = Counter(d['label'] for d in target_list)
+                for label, count in sorted(counts.items()):
+                    print(f"    {label}: {count} reps")
+                print()
                 recording = False
                 current_label = None
 
-                save_dataset(target_data, target_path)
+                with open(target_path, 'w') as f:
+                    f.write(CompactEncoder().encode(target_list))
         elif key == ord('p'):
             print_timer_start = time.time()
             print("snap shot in 3")
         elif key == ord('x'):
+            from collections import Counter
             if training_data:
-                save_dataset(training_data, 'training_data.json')
+                with open('training_data.json', 'w') as f:
+                    json.dump(training_data, f, indent=2)
                 print(f"[DONE] Saved {len(training_data)} frontal reps to training_data.json")
-                from collections import Counter
                 counts = Counter(d['label'] for d in training_data)
                 for label, count in sorted(counts.items()):
                     print(f"  {label}: {count} reps")
+            else:
+                print("[DONE] No frontal data collected.")
+
             if sideways_training_data:
-                save_dataset(sideways_training_data, 'sideways_training_data.json')
+                with open('sideways_training_data.json', 'w') as f:
+                    json.dump(sideways_training_data, f, indent=2)
                 print(f"[DONE] Saved {len(sideways_training_data)} sideways reps to sideways_training_data.json")
-                from collections import Counter
                 counts = Counter(d['label'] for d in sideways_training_data)
                 for label, count in sorted(counts.items()):
                     print(f"  {label}: {count} reps")
-            if not training_data and not sideways_training_data:
-                print("[DONE] No data collected.")
+            else:
+                print("[DONE] No sideways data collected.")
             break    
 
         

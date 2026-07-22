@@ -112,43 +112,43 @@ torch.save(model.state_dict(), 'stance_classifier.pt')
 print(f"\nBest val acc: {best_val_acc:.1%}  →  stance_classifier_best.pt")
 print(f"Final weights →  stance_classifier.pt")
 
-# ── Confusion matrix (uses best checkpoint) ────────────────
-model.load_state_dict(torch.load('stance_classifier_best.pt'))
-model.eval()
-all_preds, all_true = [], []
-with torch.no_grad():
-    for X_batch, y_batch in val_loader:
-        all_preds.extend(model(X_batch).argmax(1).numpy())
-        all_true.extend(y_batch.numpy())
+# # ── Confusion matrix (uses best checkpoint) ────────────────
+# model.load_state_dict(torch.load('stance_classifier_best.pt'))
+# model.eval()
+# all_preds, all_true = [], []
+# with torch.no_grad():
+#     for X_batch, y_batch in val_loader:
+#         all_preds.extend(model(X_batch).argmax(1).numpy())
+#         all_true.extend(y_batch.numpy())
 
-cm = confusion_matrix(all_true, all_preds)
-print("\nConfusion matrix (rows=actual, cols=predicted):")
-print(f"Classes: {list(le.classes_)}")
-print(cm)
+# cm = confusion_matrix(all_true, all_preds)
+# print("\nConfusion matrix (rows=actual, cols=predicted):")
+# print(f"Classes: {list(le.classes_)}")
+# print(cm)
 
-print("\nFor feature importance (permutation + SHAP), run analyze_stance_model.py "
-      "against the saved stance_classifier_best.pt")
+# print("\nFor feature importance (permutation + SHAP), run analyze_stance_model.py "
+#       "against the saved stance_classifier_best.pt")
 
-# ── Plots ──────────────────────────────────────────────────
-fig, axes = plt.subplots(1, 3, figsize=(16, 4))
+# # ── Plots ──────────────────────────────────────────────────
+# fig, axes = plt.subplots(1, 3, figsize=(16, 4))
 
-# Loss curves
-axes[0].plot(train_losses, label='train')
-axes[0].plot(val_losses,   label='val')
-axes[0].set_title('Loss')
-axes[0].legend()
+# # Loss curves
+# axes[0].plot(train_losses, label='train')
+# axes[0].plot(val_losses,   label='val')
+# axes[0].set_title('Loss')
+# axes[0].legend()
 
-# Val accuracy
-axes[1].plot(val_accs)
-axes[1].set_title('Val Accuracy')
-axes[1].set_ylim(0, 1)
+# # Val accuracy
+# axes[1].plot(val_accs)
+# axes[1].set_title('Val Accuracy')
+# axes[1].set_ylim(0, 1)
 
-# Confusion matrix
-disp = ConfusionMatrixDisplay(cm, display_labels=le.classes_)
-disp.plot(ax=axes[2], xticks_rotation=45, colorbar=False)
-axes[2].set_title('Confusion Matrix (best checkpoint)')
+# # Confusion matrix
+# disp = ConfusionMatrixDisplay(cm, display_labels=le.classes_)
+# disp.plot(ax=axes[2], xticks_rotation=45, colorbar=False)
+# axes[2].set_title('Confusion Matrix (best checkpoint)')
 
-plt.tight_layout()
-plt.savefig('stance_training_curves.png')
-plt.show()
-print("Plots saved to stance_training_curves.png")
+# plt.tight_layout()
+# plt.savefig('stance_training_curves.png')
+# plt.show()
+# print("Plots saved to stance_training_curves.png")

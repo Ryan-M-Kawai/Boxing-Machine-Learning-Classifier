@@ -18,7 +18,12 @@ mediapipe_env/
 *.pt
 *.pth
 !punch_classifier_best.pt
+!stance_classifier_best.pt
+!punch_classifier_sideways_best.pt
+
 !label_encoder.pkl
+!label_encoder_stance.pkl
+!label_encoder_sideways.pkl
 # ── Training data (personal recordings, grows unbounded) ──
 training_data.json
 training_data_formatted.json
@@ -33,8 +38,12 @@ stance_data.json
 analysis_output/*
 !analysis_output/stance/
 !analysis_output/stance/*.png
+
 !analysis_output/punch/
 !analysis_output/punch/*.png
+
+!analysis_output/sideways/
+!analysis_output/sideways/*.png
 
 
 

@@ -1,6 +1,8 @@
 import cv2 #4.13.0
 import mediapipe as mp #0.10.35
 import numpy as np #2.2.6
+import pyautogui #0.9.53
+import math #3.11.4
 BaseOptions = mp.tasks.BaseOptions
 PoseLandmarker = mp.tasks.vision.PoseLandmarker
 PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
@@ -26,3 +28,31 @@ def lm_to_list(lm):
 
 def lm_to_list_2d(lm):
     return [lm.x, lm.y]  # ignore z
+
+def resize_window_to_screen(cap):
+    # Get camera resolution
+    camera_width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+    camera_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    aspect_ratio = camera_width / camera_height
+    print(f"Camera Resolution: {int(camera_width)}x{int(camera_height)}")
+    print(f"Camera Aspect Ratio: {aspect_ratio:.2f}")
+
+    # Get screen resolution
+    cpu_width, cpu_height = pyautogui.size()
+    print(f"Screen Resolution: {cpu_width}x{cpu_height}")
+
+    # Leave a margin so the window doesn't butt right up against screen edges
+    # (taskbar, title bar, etc.) — adjust to taste
+    MARGIN = 0.9
+    max_width  = cpu_width * MARGIN
+    max_height = cpu_height * MARGIN
+
+    # Scale factor: whichever dimension is the tighter constraint wins
+    scale = min(max_width / camera_width, max_height / camera_height)
+
+    window_width  = math.floor(camera_width * scale)
+    window_height = math.floor(camera_height * scale)
+
+    print(f"Window Width: {window_width}, Window Height: {window_height}")
+    
+    return window_width, window_height

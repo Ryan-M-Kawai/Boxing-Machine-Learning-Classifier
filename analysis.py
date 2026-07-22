@@ -7,11 +7,29 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import shap
-
+import subprocess
+import sys
 from model import PunchClassifier, StanceClassifier
 
 # ── Choose which model/feature set to analyze ────────────────
-MODE = "punch"   # "punch" or "stance"
+
+user_input = input("Enter '0' to analyze frontal punches, '1' for sideways punches, '2' for stance classification, or '3' for all: ").strip().lower()
+if user_input == "0":
+    print("Analyzing frontal punches..., quit with Q")
+    MODE = "punch"
+elif user_input == "1":
+    print("Analyzing sideways punches..., quit with Q")
+    MODE = "sideways"
+elif user_input == "2":
+    print("Analyzing stance classification..., quit with Q")
+    MODE = "stance"
+elif user_input == "3":
+    print("Analyzing all three models..., quit with Q")
+    for i in range(3):
+        subprocess.run([sys.executable, sys.argv[0]], input=f"{i}\n", text=True)
+    sys.exit(0)
+else:
+    raise ValueError("Invalid input. Please enter '0', '1', '2', or '3'.")
 
 # ── Where to save output images ───────────────────────────────
 OUTPUT_DIR = os.path.join("analysis_output", MODE)
@@ -38,16 +56,33 @@ FEATURE_CONFIGS = {
         "input_size": 26,
         "model_class": PunchClassifier,
     },
+    "sideways": {
+        "feature_names": [
+            "elbowAngleL", "elbowAngleR", "shoulderAngleL", "shoulderAngleR",
+            "wristHeightL", "wristHeightR", "wristLextension_horz", "wristRextension_horz",
+            "wristLextension_forward", "wristRextension_forward", "shoulderTilt", "hip_tilt",
+            "hipAngleL", "hipAngleR", "legAngleL", "legAngleR",
+            "wristAboveElbowL", "wristAboveElbowR", "elbowHeightL", "elbowHeightR",
+            "wristLateralL", "wristLateralR", "elbowFlareL", "elbowFlareR",
+            "wrist_foot_extensionL", "wrist_foot_extensionR",
+        ],
+        "data_file": "sideways_training_data.json",
+        "data_key": "frames",
+        "checkpoint": "punch_classifier_sideways_best.pt",
+        "encoder_file": "label_encoder_sideways.pkl",
+        "input_size": 26,
+        "model_class": PunchClassifier,
+    },
     "stance": {
         "feature_names": [
-            "foot_x_diff", "foot_z_diff", "shoulder_x_diff", "shoulder_z_diff",
-            "wristLextension_forward", "wristRextension_forward", "hip_x_diff", "direction",
-        ],
+            "foot_x_diff", "foot_z_diff", "shoulder_x_diff", "shoulder_z_diff", "hip_x_diff", "hip_z_diff",
+            "direction","foot_x_diff_canon", "shoulder_z_diff_canon", "hip_z_diff_canon",
+            ],
         "data_file": "stance_data.json",
         "data_key": "features",            # stance snapshots store a flat feature vector
         "checkpoint": "stance_classifier_best.pt",
         "encoder_file": "stance_label_encoder.pkl",
-        "input_size": 8,
+        "input_size": 10,
         "model_class": StanceClassifier,
     },
 }
@@ -117,6 +152,7 @@ plt.savefig(out_path('confusion_matrix.png'))
 plt.show()
 print(f"Saved {out_path('confusion_matrix.png')}")
 
+# 
 # ── Feature importance (permutation importance) ─────────────
 # Idea: shuffle one feature column across samples (breaking its link to the
 # label while preserving its marginal distribution and every other feature's

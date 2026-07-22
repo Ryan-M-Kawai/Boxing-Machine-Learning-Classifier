@@ -1,4 +1,5 @@
 import json
+import os
 import numpy as np
 import torch
 import torch.nn as nn
@@ -8,48 +9,104 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 import pickle
-import shap
+from model import PunchClassifier, StanceClassifier
+# ── Which dataset to train on ───────────────────────────────
+# "frontal"  -> training_data.json          -> punch_classifier_best.pt
+# "sideways" -> sideways_training_data.json -> punch_classifier_sideways_best.pt
+user_input = input("Enter '0' to train frontal punches or '1' to train sideways punches or '2' to train stance classification: ").strip().lower()
+if user_input == "0":
+    MODE = "frontal"
+elif user_input == "1":
+    MODE = "sideways"
+elif user_input == "2":
+    MODE = "stance"
+elif user_input == "3":
+    MODE = "all"
+else:
+    raise ValueError("Invalid input. Please enter '0', '1', '2', or '3'.")
+
+assert MODE in ("frontal", "sideways", "stance", "all"), f"Unknown MODE: {MODE}"
+if MODE == "frontal":
+    DATA_FILE          = 'training_data.json'
+    LABEL_ENCODER_FILE = 'label_encoder.pkl'
+    MODEL_BEST_FILE     = 'punch_classifier_best.pt'
+    MODEL_FINAL_FILE    = 'punch_classifier.pt'
+    SUFFIX = "_frontal"
+    DATA_KEY = "frames"  # punch snapshots store a 30-frame sequence of features
+    MODEL = PunchClassifier
+elif MODE == "sideways":
+    DATA_FILE          = 'sideways_training_data.json'
+    LABEL_ENCODER_FILE = 'label_encoder_sideways.pkl'
+    MODEL_BEST_FILE     = 'punch_classifier_sideways_best.pt'
+    MODEL_FINAL_FILE    = 'punch_classifier_sideways.pt'
+    DATA_KEY = "frames"  # punch snapshots store a 30-frame sequence of features
+    SUFFIX = "_sideways"
+    MODEL = PunchClassifier
+else: 
+    DATA_FILE          = 'stance_data.json'
+    LABEL_ENCODER_FILE = 'label_encoder_stance.pkl'
+    MODEL_BEST_FILE     = 'stance_classifier_best.pt'
+    MODEL_FINAL_FILE    = 'stance_classifier.pt'
+    SUFFIX = "_stance"
+    DATA_KEY = "features"  # stance snapshots store a flat feature vector
+    MODEL = StanceClassifier
+
+print(f"[MODE] Training on: {DATA_FILE}")
 
 # ── Feature names (must match extract_features() order in get_values.py) ──
-FEATURE_NAMES = [
-    "elbowAngleL",            # 0
-    "elbowAngleR",            # 1
-    "shoulderAngleL",         # 2
-    "shoulderAngleR",         # 3
-    "wristHeightL",           # 4
-    "wristHeightR",           # 5
-    "wristLextension_horz",   # 6
-    "wristRextension_horz",   # 7
-    "wristLextension_forward",# 8
-    "wristRextension_forward",# 9
-    "shoulderTilt",           # 10
-    "hip_tilt",               # 11
-    "hipAngleL",              # 12
-    "hipAngleR",              # 13
-    "legAngleL",              # 14
-    "legAngleR",              # 15
-    "wristAboveElbowL",       # 16
-    "wristAboveElbowR",       # 17
-    "elbowHeightL",           # 18
-    "elbowHeightR",           # 19
-    "wristLateralL",          # 20
-    "wristLateralR",          # 21
-    "elbowFlareL",            # 22
-    "elbowFlareR",            # 23
-    "wrist_foot_extensionL",  # 24
-    "wrist_foot_extensionR",  # 25
-]
-
+if MODE in ("frontal", "sideways"):
+    FEATURE_NAMES = [
+        "elbowAngleL",            # 0
+        "elbowAngleR",            # 1
+        "shoulderAngleL",         # 2
+        "shoulderAngleR",         # 3
+        "wristHeightL",           # 4
+        "wristHeightR",           # 5
+        "wristLextension_horz",   # 6
+        "wristRextension_horz",   # 7
+        "wristLextension_forward",# 8
+        "wristRextension_forward",# 9
+        "shoulderTilt",           # 10
+        "hip_tilt",               # 11
+        "hipAngleL",              # 12
+        "hipAngleR",              # 13
+        "legAngleL",              # 14
+        "legAngleR",              # 15
+        "wristAboveElbowL",       # 16
+        "wristAboveElbowR",       # 17
+        "elbowHeightL",           # 18
+        "elbowHeightR",           # 19
+        "wristLateralL",          # 20
+        "wristLateralR",          # 21
+        "elbowFlareL",            # 22
+        "elbowFlareR",            # 23
+        "wrist_foot_extensionL",  # 24
+        "wrist_foot_extensionR",  # 25
+    ]
+elif MODE == "stance":
+    FEATURE_NAMES = [
+        "foot_x_diff",              # 0
+        "foot_z_diff",              # 1
+        "shoulder_x_diff",          # 2
+        "shoulder_z_diff",          # 3
+        "wristLextension_forward",  # 4
+        "wristRextension_forward",  # 5
+        "hip_x_diff",               # 6
+        "direction",                # 7
+        "foot_x_diff_canon",        # 8
+        "shoulder_z_diff_canon",    # 9
+        "hip_z_diff_canon",         # 10
+    ]
 # ── Load data ──────────────────────────────────────────────
-with open('training_data.json') as f:
+with open(DATA_FILE) as f:
     raw = json.load(f)
 
-X_np = np.array([d['frames'] for d in raw], dtype=np.float32)  # (N, 30, features)
+X_np = np.array([d[DATA_KEY] for d in raw], dtype=np.float32)  # (N, 30, features) or (N, features)
 labels = [d['label'] for d in raw]
 
-num_features_in_data = X_np.shape[2]
+num_features_in_data = X_np.shape[2] if DATA_KEY == "frames" else X_np.shape[1]
 if num_features_in_data != len(FEATURE_NAMES):
-    print(f"[WARN] training_data.json has {num_features_in_data} features per frame, "
+    print(f"[WARN] {DATA_FILE} has {num_features_in_data} features per frame, "
           f"but FEATURE_NAMES has {len(FEATURE_NAMES)} entries. "
           f"Check that extract_features() and FEATURE_NAMES are in sync before trusting the importance ranking below.")
 
@@ -58,7 +115,7 @@ y_np = le.fit_transform(labels)
 print("Classes:", le.classes_)
 print("Samples per class:", np.bincount(y_np))
 
-with open('label_encoder.pkl', 'wb') as f:
+with open(LABEL_ENCODER_FILE, 'wb') as f:
     pickle.dump(le, f)
 
 # ── Train/val split ────────────────────────────────────────
@@ -71,25 +128,9 @@ val_ds   = TensorDataset(torch.tensor(X_val),   torch.tensor(y_val,   dtype=torc
 train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
 val_loader   = DataLoader(val_ds,   batch_size=32)
 
-# ── Model ──────────────────────────────────────────────────
-class PunchClassifier(nn.Module):
-    def __init__(self, input_size, hidden_size=64, num_classes=7):
-        super().__init__()
-        self.lstm  = nn.LSTM(input_size, hidden_size, batch_first=True)  # dropout moved out
-        self.drop1 = nn.Dropout(0.3)   # after LSTM
-        self.fc1   = nn.Linear(hidden_size, 32)
-        self.relu  = nn.ReLU()
-        self.drop2 = nn.Dropout(0.3)   # after fc1
-        self.fc2   = nn.Linear(32, num_classes)
-
-    def forward(self, x):
-        out, _ = self.lstm(x)
-        out = self.fc2(self.drop2(self.relu(self.fc1(self.drop1(out[:, -1, :])))))
-        return out
-
-num_features = X_np.shape[2]
+num_features = X_np.shape[2] if DATA_KEY == "frames" else X_np.shape[1]
 num_classes  = len(le.classes_)
-model = PunchClassifier(num_features, num_classes=num_classes)
+model = MODEL(num_features, num_classes=num_classes)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 loss_fn   = nn.CrossEntropyLoss()
@@ -131,7 +172,7 @@ for epoch in range(120):
     # Save best, early stop
     if val_accs[-1] > best_val_acc:
         best_val_acc = val_accs[-1]
-        torch.save(model.state_dict(), 'punch_classifier_best.pt')
+        torch.save(model.state_dict(), MODEL_BEST_FILE)
         epochs_no_improve = 0
     else:
         epochs_no_improve += 1
@@ -140,84 +181,12 @@ for epoch in range(120):
             break
 
 # Save final weights too
-torch.save(model.state_dict(), 'punch_classifier.pt')
-print(f"\nBest val acc: {best_val_acc:.1%}  →  punch_classifier_best.pt")
-print(f"Final weights →  punch_classifier.pt")
+torch.save(model.state_dict(), MODEL_FINAL_FILE)
+print(f"\nBest val acc: {best_val_acc:.1%}  →  {MODEL_BEST_FILE}")
+print(f"Final weights →  {MODEL_FINAL_FILE}")
 
-# ── Confusion matrix (uses best checkpoint) ────────────────
-model.load_state_dict(torch.load('punch_classifier_best.pt'))
-model.eval()
-all_preds, all_true = [], []
-with torch.no_grad():
-    for X_batch, y_batch in val_loader:
-        all_preds.extend(model(X_batch).argmax(1).numpy())
-        all_true.extend(y_batch.numpy())
-
-cm = confusion_matrix(all_true, all_preds)
-print("\nConfusion matrix (rows=actual, cols=predicted):")
-print(f"Classes: {list(le.classes_)}")
-print(cm)
-
-# ── Feature importance (permutation importance) ────────────
-# Idea: shuffle one feature channel across samples (breaking its link to the
-# label while preserving its marginal distribution and every other feature's
-# structure), then measure how much validation accuracy drops. A feature the
-# model actually relies on will hurt accuracy a lot when permuted; an unused
-# feature will barely move the needle. Repeated several times and averaged
-# for stability since the shuffle is random.
-def compute_val_accuracy(model, X_tensor, y_tensor, batch_size=32):
-    model.eval()
-    correct = 0
-    with torch.no_grad():
-        for i in range(0, len(X_tensor), batch_size):
-            xb = X_tensor[i:i+batch_size]
-            yb = y_tensor[i:i+batch_size]
-            preds = model(xb).argmax(1)
-            correct += (preds == yb).sum().item()
-    return correct / len(X_tensor)
-
-X_val_t = torch.tensor(X_val)
-y_val_t = torch.tensor(y_val, dtype=torch.long)
-
-baseline_acc = compute_val_accuracy(model, X_val_t, y_val_t)
-print(f"\nBaseline val accuracy (best checkpoint): {baseline_acc:.1%}")
-
-N_REPEATS = 10
-rng = np.random.default_rng(42)
-importances = np.zeros(num_features)
-importances_std = np.zeros(num_features)
-
-print("\nComputing permutation importance "
-      f"({N_REPEATS} repeats per feature — this may take a moment)...")
-
-for f in range(num_features):
-    drops = []
-    for _ in range(N_REPEATS):
-        X_permuted = X_val.copy()
-        perm = rng.permutation(len(X_permuted))
-        # shuffle this feature channel across samples, all 30 timesteps together,
-        # so we're permuting "which rep this feature's time series came from"
-        X_permuted[:, :, f] = X_val[perm, :, f]
-
-        X_permuted_t = torch.tensor(X_permuted)
-        permuted_acc = compute_val_accuracy(model, X_permuted_t, y_val_t)
-        drops.append(baseline_acc - permuted_acc)
-
-    importances[f] = np.mean(drops)
-    importances_std[f] = np.std(drops)
-
-# ── Print ranked importance ─────────────────────────────────
-order = np.argsort(importances)[::-1]
-name_col_width = max(len(n) for n in FEATURE_NAMES) + 2
-
-print("\nFeature importance (accuracy drop when shuffled — higher = more important):")
-print(f"{'feature':<{name_col_width}}{'importance':>12}{'  (+/- std)':>12}")
-for idx in order:
-    name = FEATURE_NAMES[idx] if idx < len(FEATURE_NAMES) else f"feature_{idx}"
-    print(f"  {name:<{name_col_width}}{importances[idx]*100:>9.2f}%   (+/- {importances_std[idx]*100:.2f}%)")
-
-# ── Plots ──────────────────────────────────────────────────
-fig, axes = plt.subplots(1, 3, figsize=(16, 4))
+# # ── Plots ──────────────────────────────────────────────────
+fig, axes = plt.subplots(1, 2, figsize=(16, 4))
 
 # Loss curves
 axes[0].plot(train_losses, label='train')
@@ -230,32 +199,19 @@ axes[1].plot(val_accs)
 axes[1].set_title('Val Accuracy')
 axes[1].set_ylim(0, 1)
 
-# Confusion matrix
-disp = ConfusionMatrixDisplay(cm, display_labels=le.classes_)
-disp.plot(ax=axes[2], xticks_rotation=45, colorbar=False)
-axes[2].set_title('Confusion Matrix (best checkpoint)')
+sub_file = None
+if MODE == "frontal":
+    sub_file = f"punch"
+elif MODE == "sideways":
+    sub_file = f"sideways"
+elif MODE == "stance":
+    sub_file = f"stance"
 
+OUTPUT_DIR = os.path.join("analysis_output", sub_file)
+def out_path(filename):
+    return os.path.join(OUTPUT_DIR, filename)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 plt.tight_layout()
-plt.savefig('training_curves.png')
+plt.savefig(out_path(f'training_curves{SUFFIX}.png'))
 plt.show()
-print("Plots saved to training_curves.png")
-
-# ── Separate figure for feature importance ──────────────────
-fig2, ax = plt.subplots(figsize=(10, 8))
-sorted_names = [FEATURE_NAMES[i] if i < len(FEATURE_NAMES) else f"feature_{i}" for i in order]
-sorted_importances = importances[order] * 100
-sorted_stds = importances_std[order] * 100
-
-y_pos = np.arange(len(sorted_names))
-ax.barh(y_pos, sorted_importances, xerr=sorted_stds, color='steelblue')
-ax.set_yticks(y_pos)
-ax.set_yticklabels(sorted_names)
-ax.invert_yaxis()  # highest importance at top
-ax.set_xlabel('Val accuracy drop when feature is shuffled (%)')
-ax.set_title('Permutation feature importance')
-ax.axvline(0, color='black', linewidth=0.8)
-
-plt.tight_layout()
-plt.savefig('feature_importance.png')
-plt.show()
-print("Feature importance plot saved to feature_importance.png")
+print("Plots saved to", out_path(f'training_curves{SUFFIX}.png'))
