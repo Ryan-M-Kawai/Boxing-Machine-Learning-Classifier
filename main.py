@@ -15,7 +15,7 @@ from helper_functions import get_landmark_coordinates, angle, draw_debug, resize
 from punches import hands_up
 from get_values import extract_features, get_stance_features, direction_facing
 from model import PunchClassifier, StanceClassifier
-
+import os
 BaseOptions = mp.tasks.BaseOptions
 PoseLandmarker = mp.tasks.vision.PoseLandmarker
 PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
@@ -98,12 +98,13 @@ options = PoseLandmarkerOptions(
     result_callback=print_result)
 
 cap = cv2.VideoCapture(0)
-window_width, window_height = resize_window_to_screen(cap)
+window_width, window_height ,camera_width, camera_height= resize_window_to_screen(cap)
+window_name = 'Boxing Coach: Camera resolution ' +str(camera_width)+ 'x' +str(camera_height)+ '.'
 with PoseLandmarker.create_from_options(options) as landmarker:
     while cap.isOpened():
-        cv2.namedWindow('Boxing Coach', cv2.WINDOW_NORMAL)
-        cv2.resizeWindow('Boxing Coach', window_width, window_height)
-        cv2.moveWindow('Boxing Coach', 0, 0)  # move to top-left corner of screen
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, window_width, window_height)
+        cv2.moveWindow(window_name, 0, 0)  # move to top-left corner of screen
         ret, frame = cap.read()
         if not ret:
             break
@@ -217,7 +218,7 @@ with PoseLandmarker.create_from_options(options) as landmarker:
 
         cv2.putText(frame, "X = quit", (10, h - 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
-        cv2.imshow('Boxing Coach', frame)
+        cv2.imshow(window_name, frame)
 
         if cv2.waitKey(1) & 0xFF == ord('x'):
             break

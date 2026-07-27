@@ -55,4 +55,4 @@ def resize_window_to_screen(cap):
 
     print(f"Window Width: {window_width}, Window Height: {window_height}")
     
-    return window_width, window_height
+    return window_width, window_height, camera_width, camera_height

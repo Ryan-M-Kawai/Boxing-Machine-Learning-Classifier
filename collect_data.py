@@ -8,10 +8,10 @@ import time
 from helper_functions import get_landmark_coordinates, angle, draw_debug, resize_window_to_screen
 from punches import hands_up, stance, punch
 import json
-from get_values import extract_features, get_stance, get_stance_features
+from get_values import extract_features, get_stance_features, direction_facing
 from get_z import shoulder_to_wrist_R, shoulder_to_wrist_L
 from collections import deque
-import pyautogui
+import os
 
 BaseOptions = mp.tasks.BaseOptions
 PoseLandmarker = mp.tasks.vision.PoseLandmarker
@@ -55,21 +55,18 @@ min_detection_confidence = 0.3
 min_tracking_confidence = 0.6
 timestamp_ms = int(time.time() * 1000)
 
-#img with and height
-#16:9 aspect ratio
-
 #timer
-print_timer_start = None  # add to globals at top
+print_timer_start = None  
 
 #training
 frame_buffer = []
 
-#for stances
-stance_history = deque(maxlen=10)
 
 # for orientation (frontal vs sideways) — smoothed so a single flickery
 # frame doesn't misroute a rep into the wrong training file
 direction_history = deque(maxlen=10)
+sideways_feature_history = deque(maxlen=10)
+current_sideways_feature = False
 current_sideways = False
 
 # stance snapshot recording (toggle on/off with STANCES keys)
@@ -78,8 +75,15 @@ stance_record_label = None
 last_stance_capture_time = 0
 STANCE_CAPTURE_INTERVAL = 1.0  # seconds
 
+# Load existing training data -------------------------------
+DIRECTORY = os.path.join('data_jsons')
+os.makedirs(DIRECTORY, exist_ok=True)
+
+TRAINING_DATA_PATH = os.path.join(DIRECTORY, 'training_data.json')
+SIDEWAYS_TRAINING_DATA_PATH = os.path.join(DIRECTORY, 'sideways_training_data.json')
+STANCE_DATA_PATH = os.path.join(DIRECTORY, 'stance_data.json')
 try:
-    with open('training_data.json') as f:
+    with open(TRAINING_DATA_PATH) as f:
         training_data = json.load(f)
     print(f"[LOADED] {len(training_data)} existing reps from training_data.json")
 except FileNotFoundError:
@@ -87,7 +91,7 @@ except FileNotFoundError:
     print("[NEW] No existing data found, starting fresh")
 
 try:
-    with open('sideways_training_data.json') as f:
+    with open(SIDEWAYS_TRAINING_DATA_PATH) as f:
         sideways_training_data = json.load(f)
     print(f"[LOADED] {len(sideways_training_data)} existing reps from sideways_training_data.json")
 except FileNotFoundError:
@@ -95,19 +99,19 @@ except FileNotFoundError:
     print("[NEW] No existing sideways data found, starting fresh")
 
 try:
-    with open('stance_data.json') as f:
+    with open(STANCE_DATA_PATH) as f:
         stance_data = json.load(f)
     print(f"[LOADED] {len(stance_data)} existing stance samples from stance_data.json")
 except FileNotFoundError:
     stance_data = []
     print("[NEW] No existing stance data found, starting fresh")
+#----------------------------------------------------------------------
 
 current_label = None
 recording = False
 
-#p and s already taken
 LABELS = {
-    #from watcher left and right
+    #users left and right
     ord('q'): 'jab', 
     ord('w'): 'cross', 
     ord('e'): 'right_hook',
@@ -131,12 +135,13 @@ options = PoseLandmarkerOptions(
 
 cap = cv2.VideoCapture(0) #try 1 or 2
 timestamp_ms = 0
-window_width, window_height = resize_window_to_screen(cap)
+window_width, window_height ,camera_width, camera_height= resize_window_to_screen(cap)
 
+window_name = 'Collect_Data: Camera resolution ' +str(camera_width)+ 'x' +str(camera_height)+ '.'
 with PoseLandmarker.create_from_options(options) as landmarker:
-    cv2.namedWindow('Collect Data', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('Collect Data', window_width, window_height)
-    cv2.moveWindow('Collect Data', 0, 0)  # move to top-left corner of screen
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window_name, window_width, window_height)
+    cv2.moveWindow(window_name, 0, 0)  # move to top-left corner of screen
     while cap.isOpened():
         
         ret, frame = cap.read()
@@ -178,13 +183,6 @@ with PoseLandmarker.create_from_options(options) as landmarker:
                     x2 = int(landmarks[end_idx].x * w)
                     y2 = int(landmarks[end_idx].y * h)
                     cv2.line(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
-            stance_history.append(get_stance(landmarks))
-            smoothed_stance = max(set(stance_history), key=stance_history.count)
-
-            if smoothed_stance == 0:
-                stance_msg = "orthodox "
-            elif smoothed_stance == 1:
-                stance_msg = "southpaw"
             shoulderL = landmarks[11]
             shoulderR = landmarks[12]
             hipL = landmarks[23]
@@ -192,13 +190,13 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             shoulder_x_diff = abs(shoulderL.x - shoulderR.x)
             hip_x_diff = abs(hipL.x - hipR.x)
             sideways = shoulder_x_diff < 0.13 and hip_x_diff < 0.10
-
             direction_history.append(sideways)
             current_sideways = max(set(direction_history), key=direction_history.count)
 
-            stance_color = (0, 255, 0) if "orthodox" in stance_msg else (255, 0, 255)
-            #draw_debug(frame, f"{stance_msg} | sw:{shoulder_x_diff:.2f} hw:{hip_x_diff:.2f} side:{sideways}", 1, stance_color)
-            
+            sideways_feature = direction_facing(landmarks)
+            sideways_feature_history.append(sideways_feature)
+            current_sideways_feature = max(set(sideways_feature_history), key=sideways_feature_history.count)
+
             guard_msg = hands_up(landmarks)
             guard_color = (0,255,0) if guard_msg == "good gaurd" else (0,0,255)
             draw_debug(frame, guard_msg, 3, guard_color)
@@ -206,9 +204,9 @@ with PoseLandmarker.create_from_options(options) as landmarker:
            
             wrist_z_R = shoulder_to_wrist_R(landmarks)
             if wrist_z_R is not None:
-                draw_debug(frame, f"wrist_z: {wrist_z_R:.2f} cm", 4, (255, 255, 0))
+                draw_debug(frame, f"wrist_R_z: {wrist_z_R:.2f} cm", 4, (255, 255, 0))
             else:
-                draw_debug(frame, "wrist_z: no reading", 4, (0, 0, 255))
+                draw_debug(frame, "wrist_L_z: no reading", 4, (0, 0, 255))
             wrist_z_L = shoulder_to_wrist_L(landmarks)
             if wrist_z_L is not None:
                 draw_debug(frame, f"wrist_z: {wrist_z_L:.2f} cm", 5, (255, 255, 0))
@@ -232,14 +230,16 @@ with PoseLandmarker.create_from_options(options) as landmarker:
                     })
                     last_stance_capture_time = now
 
-                    with open('stance_data.json', 'w') as f:
+                    with open(STANCE_DATA_PATH, 'w') as f:
                         json.dump(stance_data, f, indent=2)
 
                     print(f"[STANCE SAVED] #{len(stance_data)} — {stance_record_label}: "
                           f"{[round(v, 3) for v in stance_features]}")
 
-        orientation_label = "SIDEWAYS" if current_sideways else "FRONTAL"
-        orientation_color = (0, 165, 255) if current_sideways else (0, 255, 0)
+        #orientation_label = "SIDEWAYS" if current_sideways else "FRONTAL"
+        #orientation_color = (0, 165, 255) if current_sideways else (0, 255, 0)
+        orientation_label = "LEFT <----" if current_sideways_feature == 1 else ("RIGHT ---->" if current_sideways_feature == 0 else "FRONTAL")
+        orientation_color = (0, 165, 255) if current_sideways_feature in [0, 1] else (0, 255, 0)
 
         if recording:
             label_text = f"RECORDING: {current_label}  |  buffer: {len(frame_buffer)}/30  |  {orientation_label}"
@@ -258,7 +258,7 @@ with PoseLandmarker.create_from_options(options) as landmarker:
 
         cv2.putText(frame, "q=jab w=cross e=r.hook r=l.hook t=r.upper y=l.upper 0=orthodox 1=southpaw p=print features S=save X=quit",
                     (10, h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
-        cv2.imshow('Collect Data', frame)
+        cv2.imshow(window_name, frame)
 
         # ── Keypress handling ──────────────────────────────
         key = cv2.waitKey(1) & 0xFF
@@ -316,11 +316,11 @@ with PoseLandmarker.create_from_options(options) as landmarker:
                 # route the rep based on smoothed camera orientation at save time
                 if current_sideways:
                     target_list = sideways_training_data
-                    target_path = 'sideways_training_data.json'
+                    target_path = SIDEWAYS_TRAINING_DATA_PATH
                     orientation_tag = "SIDEWAYS"
                 else:
                     target_list = training_data
-                    target_path = 'training_data.json'
+                    target_path = TRAINING_DATA_PATH
                     orientation_tag = "FRONTAL"
 
                 target_list.append({
@@ -351,7 +351,7 @@ with PoseLandmarker.create_from_options(options) as landmarker:
         elif key == ord('x'):
             from collections import Counter
             if training_data:
-                with open('training_data.json', 'w') as f:
+                with open(TRAINING_DATA_PATH, 'w') as f:
                     json.dump(training_data, f, indent=2)
                 print(f"[DONE] Saved {len(training_data)} frontal reps to training_data.json")
                 counts = Counter(d['label'] for d in training_data)
@@ -361,7 +361,7 @@ with PoseLandmarker.create_from_options(options) as landmarker:
                 print("[DONE] No frontal data collected.")
 
             if sideways_training_data:
-                with open('sideways_training_data.json', 'w') as f:
+                with open(SIDEWAYS_TRAINING_DATA_PATH, 'w') as f:
                     json.dump(sideways_training_data, f, indent=2)
                 print(f"[DONE] Saved {len(sideways_training_data)} sideways reps to sideways_training_data.json")
                 counts = Counter(d['label'] for d in sideways_training_data)
@@ -370,7 +370,7 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             else:
                 print("[DONE] No sideways data collected.")
             break    
-
+            
         
 cap.release()
 cv2.destroyAllWindows()

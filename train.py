@@ -25,30 +25,33 @@ elif user_input == "3":
 else:
     raise ValueError("Invalid input. Please enter '0', '1', '2', or '3'.")
 
+OUTPUT_DIR_PT = 'pytorch_models'
+os.makedirs(OUTPUT_DIR_PT, exist_ok=True)
+os.makedirs('pickle_models', exist_ok=True)
 assert MODE in ("frontal", "sideways", "stance", "all"), f"Unknown MODE: {MODE}"
 if MODE == "frontal":
-    DATA_FILE          = 'training_data.json'
-    LABEL_ENCODER_FILE = 'label_encoder.pkl'
-    MODEL_BEST_FILE     = 'punch_classifier_best.pt'
-    MODEL_FINAL_FILE    = 'punch_classifier.pt'
+    DATA_FILE          = os.path.join('data_jsons', 'training_data.json')
+    LABEL_ENCODER_FILE = os.path.join('pickle_models','label_encoder.pkl')
+    MODEL_BEST_FILE     = os.path.join(OUTPUT_DIR_PT, 'punch_classifier_best.pt')
+    MODEL_FINAL_FILE    = os.path.join(OUTPUT_DIR_PT, 'punch_classifier.pt')
+    DATA_KEY = "frames"
     SUFFIX = "_frontal"
-    DATA_KEY = "frames"  # punch snapshots store a 30-frame sequence of features
     MODEL = PunchClassifier
 elif MODE == "sideways":
-    DATA_FILE          = 'sideways_training_data.json'
-    LABEL_ENCODER_FILE = 'label_encoder_sideways.pkl'
-    MODEL_BEST_FILE     = 'punch_classifier_sideways_best.pt'
-    MODEL_FINAL_FILE    = 'punch_classifier_sideways.pt'
-    DATA_KEY = "frames"  # punch snapshots store a 30-frame sequence of features
+    DATA_FILE          = os.path.join('data_jsons', 'sideways_training_data.json')
+    LABEL_ENCODER_FILE = os.path.join('pickle_models','label_encoder_sideways.pkl')
+    MODEL_BEST_FILE     = os.path.join(OUTPUT_DIR_PT, 'punch_classifier_sideways_best.pt')
+    MODEL_FINAL_FILE    = os.path.join(OUTPUT_DIR_PT, 'punch_classifier_sideways.pt')
+    DATA_KEY = "frames"
     SUFFIX = "_sideways"
     MODEL = PunchClassifier
-else: 
-    DATA_FILE          = 'stance_data.json'
-    LABEL_ENCODER_FILE = 'label_encoder_stance.pkl'
-    MODEL_BEST_FILE     = 'stance_classifier_best.pt'
-    MODEL_FINAL_FILE    = 'stance_classifier.pt'
+else:
+    DATA_FILE          = os.path.join('data_jsons', 'stance_data.json')
+    LABEL_ENCODER_FILE = os.path.join('pickle_models','label_encoder_stance.pkl')
+    MODEL_BEST_FILE     = os.path.join(OUTPUT_DIR_PT, 'stance_classifier_best.pt')
+    MODEL_FINAL_FILE    = os.path.join(OUTPUT_DIR_PT, 'stance_classifier.pt')
     SUFFIX = "_stance"
-    DATA_KEY = "features"  # stance snapshots store a flat feature vector
+    DATA_KEY = "features"
     MODEL = StanceClassifier
 
 print(f"[MODE] Training on: {DATA_FILE}")
@@ -89,13 +92,12 @@ elif MODE == "stance":
         "foot_z_diff",              # 1
         "shoulder_x_diff",          # 2
         "shoulder_z_diff",          # 3
-        "wristLextension_forward",  # 4
-        "wristRextension_forward",  # 5
-        "hip_x_diff",               # 6
-        "direction",                # 7
-        "foot_x_diff_canon",        # 8
-        "shoulder_z_diff_canon",    # 9
-        "hip_z_diff_canon",         # 10
+        "hip_x_diff",               # 4
+        "hip_z_diff",               # 5
+        "direction",
+        "foot_x_diff_canon",        # 6
+        "shoulder_z_diff_canon",    # 7
+        "hip_z_diff_canon",         # 8
     ]
 # ── Load data ──────────────────────────────────────────────
 with open(DATA_FILE) as f:
@@ -181,6 +183,9 @@ for epoch in range(120):
             break
 
 # Save final weights too
+def out_path(filename):
+    return os.path.join(OUTPUT_DIR, filename)
+
 torch.save(model.state_dict(), MODEL_FINAL_FILE)
 print(f"\nBest val acc: {best_val_acc:.1%}  →  {MODEL_BEST_FILE}")
 print(f"Final weights →  {MODEL_FINAL_FILE}")
@@ -208,8 +213,7 @@ elif MODE == "stance":
     sub_file = f"stance"
 
 OUTPUT_DIR = os.path.join("analysis_output", sub_file)
-def out_path(filename):
-    return os.path.join(OUTPUT_DIR, filename)
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 plt.tight_layout()
 plt.savefig(out_path(f'training_curves{SUFFIX}.png'))

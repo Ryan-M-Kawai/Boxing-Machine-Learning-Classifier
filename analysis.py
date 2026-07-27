@@ -49,7 +49,7 @@ FEATURE_CONFIGS = {
             "wristLateralL", "wristLateralR", "elbowFlareL", "elbowFlareR",
             "wrist_foot_extensionL", "wrist_foot_extensionR",
         ],
-        "data_file": "training_data.json",
+        "data_file": "os.path.join('data_jsons', 'training_data.json')",
         "data_key": "frames",              # punch reps store a (30, features) sequence
         "checkpoint": "punch_classifier_best.pt",
         "encoder_file": "label_encoder.pkl",
@@ -66,7 +66,7 @@ FEATURE_CONFIGS = {
             "wristLateralL", "wristLateralR", "elbowFlareL", "elbowFlareR",
             "wrist_foot_extensionL", "wrist_foot_extensionR",
         ],
-        "data_file": "sideways_training_data.json",
+        "data_file": os.path.join('data_jsons', 'sideways_training_data.json'),
         "data_key": "frames",
         "checkpoint": "punch_classifier_sideways_best.pt",
         "encoder_file": "label_encoder_sideways.pkl",
@@ -78,7 +78,7 @@ FEATURE_CONFIGS = {
             "foot_x_diff", "foot_z_diff", "shoulder_x_diff", "shoulder_z_diff", "hip_x_diff", "hip_z_diff",
             "direction","foot_x_diff_canon", "shoulder_z_diff_canon", "hip_z_diff_canon",
             ],
-        "data_file": "stance_data.json",
+        "data_file": os.path.join('data_jsons', 'stance_data.json'),
         "data_key": "features",            # stance snapshots store a flat feature vector
         "checkpoint": "stance_classifier_best.pt",
         "encoder_file": "stance_label_encoder.pkl",
@@ -137,7 +137,7 @@ with torch.no_grad():
         all_preds.extend(preds)
         all_true.extend(yb)
 
-cm = confusion_matrix(all_true, all_preds)
+cm = confusion_matrix(all_true, all_preds, labels = range(num_classes))
 print("\nConfusion matrix (rows=actual, cols=predicted):")
 print(f"Classes: {list(le.classes_)}")
 print(cm)
@@ -149,6 +149,7 @@ ax0.set_title(f'Confusion Matrix ({MODE})')
 
 plt.tight_layout()
 plt.savefig(out_path('confusion_matrix.png'))
+
 plt.show()
 print(f"Saved {out_path('confusion_matrix.png')}")
 

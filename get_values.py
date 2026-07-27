@@ -82,26 +82,49 @@ def direction_facing(landmarks):
     # 0 = right, 1 = left, 2 = forward
     shoulderL = landmarks[11]
     shoulderR = landmarks[12]
+    wristL = landmarks[15]
+    wristR = landmarks[16]
     hipL = landmarks[23]
     hipR = landmarks[24]
+    footL = landmarks[31]
+    footR = landmarks[32]
+    heelL = landmarks[29]
+    heelR = landmarks[30]
+    shoulder_width = np.linalg.norm([shoulderL.x - shoulderR.x, shoulderL.y - shoulderR.y]) + 1e-6
+    hip_width = np.linalg.norm([hipL.x - hipR.x, hipL.y - hipR.y]) + 1e-6
 
-    shoulder_x_diff = abs(shoulderL.x - shoulderR.x)
-    hip_x_diff = abs(hipL.x - hipR.x)
     shoulder_z_diff = shoulderL.z - shoulderR.z
 
     shoulder_mid_y = (shoulderL.y + shoulderR.y) / 2
+    shoulder_mid_x = (shoulderL.x + shoulderR.x) / 2
+
     hip_mid_y = (hipL.y + hipR.y) / 2
     torso_height = abs(hip_mid_y - shoulder_mid_y) + 1e-6
 
-    shoulder_ratio = shoulder_x_diff / torso_height
-    hip_ratio = hip_x_diff / torso_height
+    shoulder_ratio = shoulder_width/ torso_height
+    hip_ratio = hip_width / torso_height
 
-    sideways = shoulder_ratio < 0.3 and hip_ratio < 0.27
-    if sideways:
-        direction = 0 if shoulder_z_diff <= 0 else 1
+    foot_z_diff = ((heelL.z + footL.z) / 2) - ((heelR.z + footR.z) / 2)
+    #positive when wrist more right
+    wrist_to_shoulder_X_L = wristL.x - shoulderL.x
+    wrist_to_shoulder_X_R = wristR.x - shoulderR.x
+    sideways = hip_ratio < 0.25
+    wrist_signal = (wrist_to_shoulder_X_L + wrist_to_shoulder_X_R)
+    margin = 0.8
+    if sideways and wrist_to_shoulder_X_L <= 0 and wrist_to_shoulder_X_R <0:
+        #right
+        direction = 0 
+    elif sideways and wrist_to_shoulder_X_L >0 and wrist_to_shoulder_X_R >=0:
+        #left
+        direction = 1
     else:
         direction = 2
     return direction
+    # if sideways:
+    #     direction = 0 if shoulder_z_diff <= 0 else 1
+    # else:
+    #     direction = 2
+    # return direction
 
 def get_stance_features(landmarks):
     shoulderL = landmarks[11]
@@ -130,9 +153,16 @@ def get_stance_features(landmarks):
     hip_z_diff_canon      = hip_z_diff * sign
 
     return [
-        foot_x_diff, foot_z_diff, shoulder_x_diff, shoulder_z_diff, hip_x_diff, hip_z_diff,
+        foot_x_diff, 
+        foot_z_diff, 
+        shoulder_x_diff,
+        shoulder_z_diff,
+        hip_x_diff,
+        hip_z_diff,
         direction,
-        foot_x_diff_canon, shoulder_z_diff_canon, hip_z_diff_canon,
+        foot_x_diff_canon,
+        shoulder_z_diff_canon, 
+        hip_z_diff_canon,
     ]
 
 
