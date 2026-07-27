@@ -15,7 +15,6 @@ from helper_functions import get_landmark_coordinates, angle, draw_debug, resize
 from punches import hands_up
 from get_values import extract_features, get_stance_features, direction_facing
 from model import PunchClassifier, StanceClassifier
-import os
 BaseOptions = mp.tasks.BaseOptions
 PoseLandmarker = mp.tasks.vision.PoseLandmarker
 PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
@@ -31,28 +30,29 @@ POSE_CONNECTIONS = [
 ]
 
 # ── Load punch models — frontal AND sideways ────────────────
-with open('label_encoder.pkl', 'rb') as f:
+
+with open(os.path.join('pickle_models','label_encoder.pkl'), 'rb') as f:
     le_frontal = pickle.load(f)
-with open('label_encoder_sideways.pkl', 'rb') as f:
+with open(os.path.join('pickle_models','label_encoder_sideways.pkl'), 'rb') as f:
     le_sideways = pickle.load(f)
 
 model_frontal = PunchClassifier(input_size=26, num_classes=len(le_frontal.classes_))
-model_frontal.load_state_dict(torch.load('punch_classifier_best.pt'))
+model_frontal.load_state_dict(torch.load(os.path.join('pytorch_models','punch_classifier_best.pt')))
 model_frontal.eval()
 print(f"Frontal model loaded — classes: {list(le_frontal.classes_)}")
 
 model_sideways = PunchClassifier(input_size=26, num_classes=len(le_sideways.classes_))
-model_sideways.load_state_dict(torch.load('punch_classifier_sideways_best.pt'))
+model_sideways.load_state_dict(torch.load(os.path.join('pytorch_models','punch_classifier_sideways_best.pt')))
 model_sideways.eval()
 print(f"Sideways model loaded — classes: {list(le_sideways.classes_)}")
 
 # ── Load stance model ──────────────────────────────────────
-with open('stance_label_encoder.pkl', 'rb') as f:
+with open(os.path.join('pickle_models','label_encoder_stance.pkl'), 'rb') as f:
     stance_le = pickle.load(f)
 
 stance_num_classes = len(stance_le.classes_)
 stance_model = StanceClassifier(input_size=10, num_classes=stance_num_classes)
-stance_model.load_state_dict(torch.load('stance_classifier_best.pt'))
+stance_model.load_state_dict(torch.load(os.path.join('pytorch_models','stance_classifier_best.pt')))
 stance_model.eval()
 print(f"Stance model loaded — classes: {list(stance_le.classes_)}")
 
