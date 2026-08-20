@@ -1,14 +1,14 @@
-# Boxing_CV — Real-Time Boxing Coach
+# Media Pipe Machine Learning Boxing Coach
 
-A real-time computer vision system that watches you box through a webcam, figures out your stance and what punch you're throwing, and (eventually) gives you form feedback. It's built as a full pipeline: pose extraction → feature engineering → data collection → model training → smoothed live inference.
+A real-time computer vision system that watches you box through a webcam, figures out your stance and what punch you're throwing, and gives you form feedback. It's built as a full pipeline: pose extraction → feature engineering → data collection → model training → smoothed live inference.
 
 ## What the project does
 
 1. Reads webcam frames and runs them through MediaPipe's pose landmarker to get 33 body keypoints per frame.
-2. Converts those raw landmarks into a hand-engineered, scale- and orientation-normalized feature vector (joint angles, wrist/elbow height, lateral extension, hip rotation, etc.).
+2. Converts those ra landmarks into scale and orientation based features vector (joint angles, wrist/elbow height compared to shoulders, hip rotation, etc.).
 3. Buffers 30 frames of features into a short sequence and feeds it to an LSTM classifier to recognize the punch being thrown.
-4. Runs a separate lightweight classifier to detect stance (orthodox vs. southpaw).
-5. Smooths all of this over time with rolling-history buffers so a single noisy frame doesn't cause a flickery, wrong label.
+4. Simultaneously runs a separate classifier to detect stance (orthodox vs. southpaw).
+5. Smooths motion with rolling-history buffers so a single noisy frame doesn't cause a flickery, wrong label.
 6. Draws the skeleton, guard feedback, and predicted punch/stance back onto the live video feed.
 
 ## Project structure
@@ -17,23 +17,24 @@ A real-time computer vision system that watches you box through a webcam, figure
 ├── collect_data.py        # Labeled training data collection via webcam
 ├── get_values.py          # Feature extraction (extract_features, get_stance, get_stance_features)
 ├── get_z.py                # Custom z-depth reconstruction (camera geometry + bone-length constraints)
-├── helper_functions.py    # Shared utilities (angle calc, landmark helpers, draw_debug)
+├── helper_functions.py    # Shared utilities (angle calc, landmark helpers, cv_print functions)
 ├── punches.py               # Rule-based guard/stance/punch heuristics
 ├── model.py                 # PunchClassifier LSTM architecture
 ├── train.py                  # Offline training, evaluation, permutation/SHAP feature analysis
 ├── train_stances.py         # Offline training for the stance MLP
-├── main.py                    # Live inference — the actual coaching app
-├── requirements.txt
+├── main.py                    #  Final product, the live coaching app
+├── requirements.txt           #required packahes
+├── analysis.py      #generates pytorch and SHAP analysis of feature weight, confusion matrixes, feature correlation, and training_curves
 └── .gitignore
 ```
 
 ## Requirements
 
-- **Python 3.10** (required — MediaPipe's Tasks API has compatibility constraints on newer versions)
-- A webcam (developed on a Logitech C310)
+- **Python 3.10** ( MediaPipe's Tasks API has compatibility constraints on newer versions)
+- A webcam 
 - Windows / Mac / Linux (developed on Windows with Git Bash)
 
-## Setup
+## Setup Instructions
 
 ```bash
 # Clone the repo
@@ -49,19 +50,15 @@ source venv/Scripts/activate      # Windows Git Bash
 pip install -r requirements.txt
 ```
 
-Virtual environments are never relocated — they hardcode internal paths, so moving the project folder means rebuilding `venv` fresh rather than copying it.
-
 ### Download the MediaPipe pose model
 
-The pose landmarker model file (`pose_landmarker_full.task`) is not included in this repo (large third-party binary). Download it from Google's MediaPipe model zoo and place it in the project root:
+The pose landmarker model file (`pose_landmarker_full.task`) is not included in this repo because it is too big. Download it from Google's MediaPipe model zoo and place it in the project root:
 
 ```bash
 curl -o pose_landmarker_full.task https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task
 ```
 
-*(check the [MediaPipe pose landmarker docs](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker) for the current download link if this changes)*
-
-## Usage
+## Usage Instructions
 
 ### Run the live coach
 
@@ -69,30 +66,27 @@ curl -o pose_landmarker_full.task https://storage.googleapis.com/mediapipe-model
 python main.py
 ```
 
-Press **Q** to quit.
+Press **X** to quit.
 
 ### Collect your own training data
 
 ```bash
 python collect_data.py
 ```
+The training data original (`training_data.json`) I used to train the pickle and pytorch models  (e.g. `punch_classifier_best.pt` + `label_encoder.pkl`) is **not included** in this repo due to its size. Pretrained models are committed as paired release artifacts so `main.py` runs out of the box. To train your own model, run `collect_data.py` to record your own labeled reps. 
 
-Controls: `q/w/e/r/t/y` label jab / cross / right hook / left hook / right uppercut / left uppercut; `0/1` label stance orthodox/southpaw; `S` saves the current buffered rep; `P` prints current feature values (debug); `Q` quits and saves.
+Controls: `q/w/e/r/t/y` label jab / cross / right hook / left hook / right uppercut / left uppercut; `0/1` label stance orthodox/southpaw; `S` saves the current buffered rep; `P` prints current feature values for debugging; `X` quits and saves.
+Quitting and saving will create a `training_data.json`, or add to it if a custom one already exists.
 
-### Retrain the models
+### Retraining the models
 
 ```bash
 python train.py           # punch classifier(s)
 python train_stances.py   # stance classifier
 ```
 
-`train.py` trains on `training_data.json` (not included — see below), saves `punch_classifier_best.pt` + `label_encoder.pkl`, and produces training curves, a confusion matrix, permutation importance, and SHAP attribution plots.
+`train.py` trains on `training_data.json`, saves `punch_classifier_best.pt` + `label_encoder.pkl`, `analysis.py`  produces training curves, a confusion matrix, permutation importance, and SHAP attribution plots.
 
-## About the training data
-
-Raw training data (`training_data.json`) is **not included** in this repo due to size and because it's personal recorded pose data. Pretrained models are committed as paired release artifacts (e.g. `punch_classifier_best.pt` + `label_encoder.pkl`) so `main.py` runs out of the box. To train your own model, run `collect_data.py` to record your own labeled reps.
-
----
 
 ## Model architecture
 
@@ -120,16 +114,11 @@ Input:  (batch, 30 frames, 26 features)
 
 - A separate, much smaller feed-forward network trained on its own feature set (`get_stance_features()`), classifying orthodox vs. southpaw.
 - Trained independently via `train_stances.py`, saved to its own `.pkl`/`.pt` artifacts, and kept fully decoupled from the punch model — stance and punch are different signals, and collapsing them into one model would mean one bad frame corrupts both predictions.
-
-### Why separate models instead of one big model
-
-This is a deliberate pattern used throughout the project: distinct *tasks* (punch type vs. stance) and distinct *input geometries* (frontal vs. sideways) get distinct models, rather than being jammed into one classifier with a shared head. The trade-off is more files to manage, but each model stays small, fast to retrain, and easy to debug in isolation. Don't collapse distinct signals into one model unless input dimensions stay constant.
-
 ---
 
 ## Feature engineering (`get_values.py`)
 
-Each frame is converted into a 26-value feature vector — not raw pixel coordinates. Raw x/y/z landmark positions are scale-dependent (a person standing closer to the camera has bigger raw motion) and orientation-dependent (facing left vs. right flips signs), so everything is normalized before it ever reaches the model:
+Each frame is converted into a 26-value feature vector. x/y/z landmark positions alone are to imprecise based on a users orientation or distance from the camera, so everything is normalized before it ever reaches the model:
 
 | # | Feature | # | Feature |
 |---|---------|---|---------|
@@ -186,8 +175,6 @@ Because the LSTM sees a constantly-sliding window, it will happily produce a con
 
 ## Model interpretability tooling (`train.py`)
 
-Beyond just training, `train.py` tries to answer *why* the model predicts what it predicts:
-
 - **Permutation importance:** shuffles one feature channel across validation samples (breaking that feature's link to the label) and measures how much validation accuracy drops — repeated multiple times per feature and averaged, since the shuffle is random.
 - **SHAP (gradient-based attribution):** uses `GradientExplainer` against a background reference sample to attribute each prediction back to individual input features, both overall and per-punch-class, giving a sense of *how much* a feature pushes the output, not just whether the model relies on it.
 - **Feature correlation matrix:** a Pearson correlation heatmap across all 26 features (flattened across samples and timesteps) to catch redundant or highly-correlated engineered features.
@@ -224,24 +211,21 @@ Known limitations:
 
 ---
 
-## What's missing / known gaps
+## What's missing 
 
 - **No trained motion detector yet** — the idle/moving gate is still a hand-tuned heuristic (Option A above), not a learned binary classifier (Option C). The heuristic works but is fragile to re-tune if camera setup or motion style changes.
 - **Sideways punch data is thin** — the sideways model currently recognizes essentially one class reliably; it needs a lot more labeled sideways reps before it's on par with the frontal model.
 - **Depth (z) requires manual calibration** — the custom z-depth reconstruction depends on hardcoded real-world height/camera-height/focal-length constants measured once for one setup; it isn't automatically calibrated per user or per camera placement.
 - **Single camera, no true stereo depth** — even with the kinematic-chain z-reconstruction, this is an estimate built on anthropometric averages and MediaPipe's noisy landmarks, not a hardware depth sensor. This is the likely cause of the project's most persistent classification confusion: uppercuts vs. hooks look biomechanically similar from one camera angle.
-- **No real form-feedback model yet** — guard/hands-up feedback is rule-based (a simple heuristic on landmark positions), not learned. Deeper form coaching (e.g., "your chin is up," "you're not rotating your hips enough") is on the roadmap but not implemented.
-- **Housekeeping bug, not yet fixed:** `.gitignore` references `label_encoder_stance.pkl`, but the stance training path actually saves the file as `stance_encoder.pkl` — the filenames don't match, which risks accidentally committing a large local artifact.
-- **No epoch-by-epoch training history saved for punch models** — `.pt` checkpoints only store final weights, not the full loss/accuracy curve, unless a separate `training_history.json` is explicitly exported during that run.
+n.
 
 ## Roadmap
 
 - Empirically validate and tune `MOTION_FEATURE_IDX` blend weights with a structured logging/tap process before moving on to Option C.
 - Replace the heuristic motion gate with a trained binary (moving vs. idle) detector.
 - Collect substantially more sideways training data to bring the sideways model up to parity with the frontal one.
-- Fix the `.gitignore` / `stance_encoder.pkl` naming mismatch.
 - Camera geometry auto-calibration so the z-depth reconstruction doesn't depend on hand-measured constants.
-- Move toward real per-punch form feedback rather than the current rule-based guard check.
+
 
 ## License
 
