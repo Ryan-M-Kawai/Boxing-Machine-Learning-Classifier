@@ -13,7 +13,7 @@ from model import PunchClassifier, StanceClassifier
 # ── Which dataset to train on ───────────────────────────────
 # "frontal"  -> training_data.json          -> punch_classifier_best.pt
 # "sideways" -> sideways_training_data.json -> punch_classifier_sideways_best.pt
-user_input = input("Enter '0' to train frontal punches or '1' to train sideways punches or '2' to train stance classification: ").strip().lower()
+user_input = input("Enter '0' to train frontal punches or '1' to train sideways punches or '2' to train stance classification or '3' to train all: ").strip().lower()
 if user_input == "0":
     MODE = "frontal"
 elif user_input == "1":

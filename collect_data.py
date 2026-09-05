@@ -5,8 +5,7 @@ import numpy as np #2.2.6
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import time
-from helper_functions import get_landmark_coordinates, angle, draw_debug, resize_window_to_screen
-from punches import hands_up, stance, punch
+from helper_functions import get_landmark_coordinates, angle, draw_debug, resize_window_to_screen, hands_up
 import json
 from get_values import extract_features, get_stance_features, direction_facing
 from get_z import shoulder_to_wrist_R, shoulder_to_wrist_L
