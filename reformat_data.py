@@ -19,9 +19,7 @@ class CompactFramesEncoder(json.JSONEncoder):
         else:
             yield from super().iterencode(obj, _one_shot)
 
-# overwrite original
-# with open('training_data.json', 'w') as f:
-#     f.write(CompactFramesEncoder().encode(data))
+
 
 #or write to a new file instead
 with open('training_data_formatted.json', 'w') as f:

@@ -68,13 +68,12 @@ sideways_feature_history = deque(maxlen=10)
 current_sideways_feature = False
 current_sideways = False
 
-# stance snapshot recording (toggle on/off with STANCES keys)
 stance_recording = False
 stance_record_label = None
 last_stance_capture_time = 0
 STANCE_CAPTURE_INTERVAL = 1.0  # seconds
 
-# Load existing training data -------------------------------
+# Load existing training data 
 DIRECTORY = os.path.join('data_jsons')
 os.makedirs(DIRECTORY, exist_ok=True)
 
@@ -104,7 +103,6 @@ try:
 except FileNotFoundError:
     stance_data = []
     print("[NEW] No existing stance data found, starting fresh")
-#----------------------------------------------------------------------
 
 current_label = None
 recording = False
@@ -132,7 +130,14 @@ options = PoseLandmarkerOptions(
     running_mode=VisionRunningMode.LIVE_STREAM,
     result_callback = print_result)
 
-cap = cv2.VideoCapture(0) #try 1 or 2
+#shuffle through cameras until you find one that works, should default to usb webcam
+camera_index = 0  # default camera
+cap = cv2.VideoCapture(camera_index)
+if(cap.isOpened() == False)&(camera_index < 5):
+    cap.release()
+    camera_index += 1
+    cap = cv2.VideoCapture(camera_index)
+print(f"Using camera index {camera_index}")
 timestamp_ms = 0
 window_width, window_height ,camera_width, camera_height= resize_window_to_screen(cap)
 
@@ -219,7 +224,7 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             if len(frame_buffer) > 30:
                 frame_buffer.pop(0)
 
-            # ── Stance snapshot recording (toggled by STANCES keys) ──
+            # Stance Recording
             if stance_recording:
                 now = time.time()
                 if now - last_stance_capture_time >= STANCE_CAPTURE_INTERVAL:
@@ -235,8 +240,6 @@ with PoseLandmarker.create_from_options(options) as landmarker:
                     print(f"[STANCE SAVED] #{len(stance_data)} — {stance_record_label}: "
                           f"{[round(v, 3) for v in stance_features]}")
 
-        #orientation_label = "SIDEWAYS" if current_sideways else "FRONTAL"
-        #orientation_color = (0, 165, 255) if current_sideways else (0, 255, 0)
         orientation_label = "LEFT <----" if current_sideways_feature == 1 else ("RIGHT ---->" if current_sideways_feature == 0 else "FRONTAL")
         orientation_color = (0, 165, 255) if current_sideways_feature in [0, 1] else (0, 255, 0)
 
@@ -369,7 +372,6 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             else:
                 print("[DONE] No sideways data collected.")
             break    
-            
         
 cap.release()
 cv2.destroyAllWindows()

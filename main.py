@@ -27,9 +27,6 @@ POSE_CONNECTIONS = [
     (0,1),(1,2),(2,3),(3,7),(0,4),(4,5),(5,6),(6,8),
     (9,10),(15,17),(15,19),(15,21),(16,18),(16,20),(16,22)
 ]
-
-# ── Load punch models — frontal AND sideways ────────────────
-
 with open(os.path.join('pickle_models','label_encoder.pkl'), 'rb') as f:
     le_frontal = pickle.load(f)
 with open(os.path.join('pickle_models','label_encoder_sideways.pkl'), 'rb') as f:
@@ -45,7 +42,6 @@ model_sideways.load_state_dict(torch.load(os.path.join('pytorch_models','punch_c
 model_sideways.eval()
 print(f"Sideways model loaded — classes: {list(le_sideways.classes_)}")
 
-# ── Load stance model ──────────────────────────────────────
 with open(os.path.join('pickle_models','label_encoder_stance.pkl'), 'rb') as f:
     stance_le = pickle.load(f)
 
@@ -55,17 +51,16 @@ stance_model.load_state_dict(torch.load(os.path.join('pytorch_models','stance_cl
 stance_model.eval()
 print(f"Stance model loaded — classes: {list(stance_le.classes_)}")
 
-# Smoothing — majority vote over last N stance predictions
+# Smoothing
 STANCE_SMOOTH_WINDOW = 10
 stance_history = deque(maxlen=STANCE_SMOOTH_WINDOW)
 
-# ── Orientation tracking (drives which punch model runs) ────
+# Tracking if sideways or frontal, to decide which punch model to run
 DIRECTION_SMOOTH_WINDOW = 10
 direction_history = deque(maxlen=DIRECTION_SMOOTH_WINDOW)
 current_direction = 2          # 0=right facing, 1=left facing, 2/other=forward
 current_sideways  = False
 
-# ── Globals ────────────────────────────────────────────────
 latest_result = None
 frame_buffer  = []
 timestamp_ms  = 0
@@ -80,13 +75,7 @@ pred_history_frontal  = deque(maxlen=SMOOTH_WINDOW)
 pred_history_sideways = deque(maxlen=SMOOTH_WINDOW)
 
 # ── Motion-gated triggering ──────────────────────────────
-# Indices into extract_features() output — the features that move most
-# during a punch (elbow angles, wrist heights, extensions, laterals).
-# Only fire the punch classifier when motion crosses FIRE_THRESHOLD, and
-# don't allow it to fire again until motion settles back under
-# RESET_THRESHOLD (arm back near guard). Avoids classifying idle frames
-# into a punch label, since neither punch model currently has a "no
-# punch" class of its own.
+#unless theres a change in the motion of the punch, it will not be detected. This is to prevent false positives from the model.
 MOTION_FEATURE_IDX = [0, 1, 4, 5, 6, 7, 8, 9, 20, 21]
 FIRE_THRESHOLD  = 0.25   # tune live via the on-screen motion readout
 RESET_THRESHOLD = 0.12   # must settle back under this to re-arm
@@ -134,7 +123,6 @@ with PoseLandmarker.create_from_options(options) as landmarker:
         small_frame = cv2.resize(rgb_frame, (inference_width, inference_height))
         mp_image   = mp.Image(image_format=mp.ImageFormat.SRGB, data=small_frame)
         timestamp_ms += 1
-        #landmarker.detect_async(mp_image, timestamp_ms)
         frame_counter += 1
         if frame_counter % 2 == 0:
             landmarker.detect_async(mp_image, timestamp_ms)
@@ -153,20 +141,19 @@ with PoseLandmarker.create_from_options(options) as landmarker:
                     x2, y2 = int(landmarks[end_idx].x * w), int(landmarks[end_idx].y * h)
                     cv2.line(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
 
-            # ── Form feedback ──────────────────────────────
-
+            #Gaurd feedback
             guard_msg = hands_up(landmarks)
             guard_color = (0, 255, 0) if guard_msg == "good gaurd" else (0, 0, 255)
             draw_debug(frame, guard_msg, 3, guard_color)
 
-            # ── Orientation detection — decides which punch model runs ──
+            # orientation detection
             direction = direction_facing(landmarks)
             direction_history.append(direction)
             current_direction = max(set(direction_history), key=direction_history.count)
             current_sideways = current_direction in (0, 1)
 
         
-            # ── Stance inference ────────────────────────────
+            # Stance detection
             stance_features = get_stance_features(landmarks)
             stance_X = torch.tensor([stance_features], dtype=torch.float32)
             with torch.no_grad():
@@ -182,17 +169,15 @@ with PoseLandmarker.create_from_options(options) as landmarker:
             stance_color = (0, 255, 0) if smoothed_stance == 'orthodox' else (255, 0, 255)
             draw_debug(frame, f"Stance: {smoothed_stance} ({stance_conf:.0%})", 2, stance_color)
 
-            # ── Feature extraction ─────────────────────────
+        
             features = extract_features(landmarks)
-
-            # ── Motion magnitude (frame-to-frame delta on punch-relevant features) ──
             if prev_features is not None:
                 motion = sum(abs(features[i] - prev_features[i]) for i in MOTION_FEATURE_IDX)
             else:
                 motion = 0.0
             prev_features = features
 
-            # ── Tuning aid — remove once thresholds are locked in ──
+            # Tune motion threshold live via the on-screen readout, to avoid false positives from small movements
             if frame_counter % 15 == 0:  # don't spam the console
                 print(f"motion={motion:.3f}")
             draw_debug(frame, f"motion: {motion:.3f}  armed: {punch_armed}", 5, (255, 0, 255))

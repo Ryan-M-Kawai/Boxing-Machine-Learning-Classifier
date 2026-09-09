@@ -10,7 +10,6 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 import pickle
 from model import PunchClassifier, StanceClassifier
-# ── Which dataset to train on ───────────────────────────────
 # "frontal"  -> training_data.json          -> punch_classifier_best.pt
 # "sideways" -> sideways_training_data.json -> punch_classifier_sideways_best.pt
 user_input = input("Enter '0' to train frontal punches or '1' to train sideways punches or '2' to train stance classification or '3' to train all: ").strip().lower()
@@ -56,7 +55,6 @@ else:
 
 print(f"[MODE] Training on: {DATA_FILE}")
 
-# ── Feature names (must match extract_features() order in get_values.py) ──
 if MODE in ("frontal", "sideways"):
     FEATURE_NAMES = [
         "elbowAngleL",            # 0
@@ -99,7 +97,6 @@ elif MODE == "stance":
         "shoulder_z_diff_canon",    # 7
         "hip_z_diff_canon",         # 8
     ]
-# ── Load data ──────────────────────────────────────────────
 with open(DATA_FILE) as f:
     raw = json.load(f)
 
@@ -120,7 +117,6 @@ print("Samples per class:", np.bincount(y_np))
 with open(LABEL_ENCODER_FILE, 'wb') as f:
     pickle.dump(le, f)
 
-# ── Train/val split ────────────────────────────────────────
 X_train, X_val, y_train, y_val = train_test_split(
     X_np, y_np, test_size=0.2, random_state=42, stratify=y_np
 )
@@ -137,7 +133,7 @@ model = MODEL(num_features, num_classes=num_classes)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 loss_fn   = nn.CrossEntropyLoss()
 
-# ── Training loop with early stopping ─────────────────────
+#training loop
 train_losses, val_losses, val_accs = [], [], []
 best_val_acc      = 0.0
 epochs_no_improve = 0
@@ -171,7 +167,7 @@ for epoch in range(120):
         print(f"Epoch {epoch+1:3d} | train loss: {train_losses[-1]:.4f} | "
               f"val loss: {val_losses[-1]:.4f} | val acc: {val_accs[-1]:.1%}")
 
-    # Save best, early stop
+    # Save best
     if val_accs[-1] > best_val_acc:
         best_val_acc = val_accs[-1]
         torch.save(model.state_dict(), MODEL_BEST_FILE)
@@ -190,7 +186,7 @@ torch.save(model.state_dict(), MODEL_FINAL_FILE)
 print(f"\nBest val acc: {best_val_acc:.1%}  →  {MODEL_BEST_FILE}")
 print(f"Final weights →  {MODEL_FINAL_FILE}")
 
-# # ── Plots ──────────────────────────────────────────────────
+# Grpahs
 fig, axes = plt.subplots(1, 2, figsize=(16, 4))
 
 # Loss curves

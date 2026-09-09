@@ -11,8 +11,6 @@ import subprocess
 import sys
 from model import PunchClassifier, StanceClassifier
 
-# ── Choose which model/feature set to analyze ────────────────
-
 user_input = input("Enter '0' to analyze frontal punches, '1' for sideways punches, '2' for stance classification, or '3' for all: ").strip().lower()
 if user_input == "0":
     print("Analyzing frontal punches..., quit with Q")
@@ -31,7 +29,6 @@ elif user_input == "3":
 else:
     raise ValueError("Invalid input. Please enter '0', '1', '2', or '3'.")
 
-# ── Where to save output images ───────────────────────────────
 OUTPUT_DIR = os.path.join("analysis_output", MODE)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -91,13 +88,13 @@ cfg = FEATURE_CONFIGS[MODE]
 FEATURE_NAMES = cfg["feature_names"]
 print(f"── Analyzing MODE = '{MODE}' ──")
 
-# ── Load label encoder ──────────────────────────────────────
+# Load label encoder 
 with open(cfg["encoder_file"], 'rb') as f:
     le = pickle.load(f)
 num_classes = len(le.classes_)
 print("Classes:", le.classes_)
 
-# ── Load data (same split as training, so val set matches) ──
+# Load data
 with open(cfg["data_file"]) as f:
     raw = json.load(f)
 
@@ -118,7 +115,7 @@ X_train, X_val, y_train, y_val = train_test_split(
     X_np, y_np, test_size=0.2, random_state=42, stratify=y_np
 )
 
-# ── Load trained model ───────────────────────────────────────
+# load model
 ModelClass = cfg["model_class"]
 model = ModelClass(input_size=num_features, num_classes=num_classes)
 model.load_state_dict(torch.load(cfg["checkpoint"]))
@@ -127,7 +124,7 @@ print(f"Loaded {cfg['checkpoint']}")
 
 name_col_width = max(len(n) for n in FEATURE_NAMES) + 2
 
-# ── Confusion matrix ─────────────────────────────────────────
+# generate confusion matrix
 all_preds, all_true = [], []
 with torch.no_grad():
     for i in range(0, len(X_val), 32):
@@ -153,14 +150,8 @@ plt.savefig(out_path('confusion_matrix.png'))
 plt.show()
 print(f"Saved {out_path('confusion_matrix.png')}")
 
-# 
-# ── Feature importance (permutation importance) ─────────────
-# Idea: shuffle one feature column across samples (breaking its link to the
-# label while preserving its marginal distribution and every other feature's
-# structure), then measure how much validation accuracy drops. A feature the
-# model actually relies on will hurt accuracy a lot when permuted; an unused
-# feature will barely move the needle. Repeated several times and averaged
-# for stability since the shuffle is random.
+
+# Feature importance
 def compute_val_accuracy(model, X_tensor, y_tensor, batch_size=32):
     model.eval()
     correct = 0
@@ -183,7 +174,7 @@ rng = np.random.default_rng(42)
 importances = np.zeros(num_features)
 importances_std = np.zeros(num_features)
 
-print(f"\nComputing permutation importance ({N_REPEATS} repeats per feature — this may take a moment)...")
+print(f"\nComputing permutation importance ({N_REPEATS} repeats per feature)")
 
 for f in range(num_features):
     drops = []
@@ -230,13 +221,7 @@ plt.savefig(out_path('feature_importance.png'))
 plt.show()
 print(f"Saved {out_path('feature_importance.png')}")
 
-# ── Feature importance (SHAP, gradient-based) ───────────────
-# Idea: unlike permutation importance (which measures accuracy drop from
-# breaking a feature), SHAP's GradientExplainer uses the model's actual
-# gradients — how much the output logits move as each input feature moves —
-# combined with a background reference distribution, to attribute each
-# prediction's output back to individual input features (an approximation
-# of Integrated Gradients / expected gradients).
+# SHAP gradient-based attribution
 print("\nComputing SHAP values (gradient-based attribution)...")
 
 background_size = min(100, len(X_train))
@@ -251,8 +236,6 @@ y_explain = y_val[explain_idx]
 explainer = shap.GradientExplainer(model, background)
 shap_values = explainer.shap_values(X_explain)
 
-# SHAP's return shape has varied across versions: either a list of
-# per-class arrays, or a single stacked array with class as the last axis.
 if isinstance(shap_values, list):
     shap_arr = np.stack(shap_values, axis=-1)
 else:
@@ -277,7 +260,7 @@ else:
         if mask.sum() > 0:
             per_class_importance[c] = np.mean(np.abs(shap_arr[mask, :, c]), axis=0)
 
-# ── Print ranked SHAP importance ────────────────────────────
+# Shap importance ranking
 shap_order = np.argsort(shap_importance)[::-1]
 print("\nSHAP feature importance (mean |gradient-based attribution| — higher = more important):")
 print(f"{'feature':<{name_col_width}}{'mean |SHAP|':>14}")
@@ -285,7 +268,7 @@ for idx in shap_order:
     name = FEATURE_NAMES[idx] if idx < len(FEATURE_NAMES) else f"feature_{idx}"
     print(f"  {name:<{name_col_width}}{shap_importance[idx]:>12.4f}")
 
-# ── Compare SHAP vs permutation rankings ────────────────────
+# Compare SHAP vs permutation rankings 
 print("\nSHAP rank vs permutation rank (feature: shap_rank, perm_rank):")
 perm_rank = {idx: rank for rank, idx in enumerate(order, start=1)}
 shap_rank = {idx: rank for rank, idx in enumerate(shap_order, start=1)}
@@ -293,7 +276,7 @@ for idx in shap_order:
     name = FEATURE_NAMES[idx] if idx < len(FEATURE_NAMES) else f"feature_{idx}"
     print(f"  {name:<{name_col_width}} shap #{shap_rank[idx]:<4} perm #{perm_rank[idx]}")
 
-# ── Plot: overall SHAP importance ───────────────────────────
+# Overall SHAP importance bar chart
 fig3, ax = plt.subplots(figsize=(10, 8))
 sorted_shap_names = [FEATURE_NAMES[i] if i < len(FEATURE_NAMES) else f"feature_{i}" for i in shap_order]
 sorted_shap_vals = shap_importance[shap_order]
@@ -311,7 +294,7 @@ plt.savefig(out_path('shap_feature_importance.png'))
 plt.show()
 print(f"Saved {out_path('shap_feature_importance.png')}")
 
-# ── Plot: per-class SHAP importance heatmap ─────────────────
+# SHAP heatmap
 fig4, ax = plt.subplots(figsize=(10, max(6, num_classes * 0.6)))
 im = ax.imshow(per_class_importance, aspect='auto', cmap='viridis')
 ax.set_xticks(np.arange(num_features))
@@ -326,10 +309,8 @@ plt.savefig(out_path('shap_per_class_importance.png'))
 plt.show()
 print(f"Saved {out_path('shap_per_class_importance.png')}")
 
-# ── Feature correlation matrix ───────────────────────────────
+# feature correlation matrix
 if is_seq:
-    # Flatten (samples, timesteps, features) -> (samples*timesteps, features)
-    # so each row is one frame's feature vector, treated as one observation.
     X_flat = X_np.reshape(-1, X_np.shape[-1])
 else:
     X_flat = X_np

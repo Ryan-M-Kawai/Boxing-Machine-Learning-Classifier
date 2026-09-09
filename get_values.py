@@ -12,73 +12,7 @@ image_width_px = 640
 image_height_px = 360
 #users left and right
 # module-level, outside any function — persists across frames
-
-
-def get_stance(landmarks):
-    shoulderL = landmarks[11]
-    shoulderR = landmarks[12]
-    footL = landmarks[31]
-    footR = landmarks[32]
-    hipL = landmarks[23]
-    hipR = landmarks[24]
-    #when sideways facing right, orthodox is positive southpaw negative
-    #when sideways facing left, orthodox is negative southpaw is positive
-    #irrelevant when facing forward
-    foot_x_diff = footL.x - footR.x
-    if(foot_x_diff <=0): #
-        foot_x_diff_bool = 0
-    else:
-        foot_x_diff_bool = 1
-
-    # which foot is forward, pos if left foot back, neg if left foot forward
-    # when facing camera: if left foot forward negative, orthodox is negative, southpaw is positive
-    # Camera view sideways: if facing right, positive, if facing left: negative
-    foot_z_diff = footL.z - footR.z
-    if(foot_z_diff <=0):
-        foot_z_diff_bool = 0
-    else:
-        foot_z_diff_bool =1
-    #same logic as foot
-    hip_z_diff = hipL.z - hipR.z
-    if(hip_z_diff <= 0):
-        hip_z_diff_bool = 0
-    else:
-        hip_z_diff_bool =1
-
-    #positive sideways facing right, negative sideways facing left
-    #when forwards, positive is orthodox, negative is southpaw
-    shoulder_z_diff = shoulderL.z - shoulderR.z
-    if shoulder_z_diff <= 0:
-        shoulder_z_diff_bool = 0 #right
-    else:
-        shoulder_z_diff_bool = 1 #left
-    
-    shoulder_x_diff = abs(shoulderL.x - shoulderR.x) 
-    hip_x_diff = abs(hipL.x-hipR.x)
-    
-    sideways = shoulder_x_diff <0.11 and hip_x_diff <0.11
-    #print(f"foot_z_diff: {foot_z_diff:.3f}  shoulder_z_diff: {shoulder_z_diff:.3f}  sideways: {sideways}")
-    if sideways == 1:
-        #print("side")
-        #0 if right, 1 if left
-        direction = shoulder_z_diff_bool
-        stance = direction ^ foot_x_diff_bool
-    else:
-        #print("forward")
-        stance_float = (hip_z_diff + shoulder_z_diff)/2
-        if stance_float <=0:
-            stance = 0
-        else: 
-            stance = 1
-    #talk abt k maps
-    #0 = orthodox, 1 = southpaw
-    #return stance
-    #return shoulder_x_diff
-    #return hip_x_diff
-    return shoulder_z_diff_bool
 def direction_facing(landmarks):
-
-
     # 0 = right, 1 = left, 2 = forward
     shoulderL = landmarks[11]
     shoulderR = landmarks[12]
@@ -120,11 +54,6 @@ def direction_facing(landmarks):
     else:
         direction = 2
     return direction
-    # if sideways:
-    #     direction = 0 if shoulder_z_diff <= 0 else 1
-    # else:
-    #     direction = 2
-    # return direction
 
 def get_stance_features(landmarks):
     shoulderL = landmarks[11]
@@ -238,8 +167,6 @@ def extract_features(landmarks):
     elbowFlareL = (elbowL.x - shoulderL.x) / (shoulder_width + 1e-6)
     elbowFlareR = (elbowR.x - shoulderR.x) / (shoulder_width + 1e-6)
 
-    #stance
-    stance = get_stance(landmarks)
     #16 outputs
     return [
     elbowAngleL,            # 0  - left elbow bend
