@@ -137,6 +137,9 @@ Key normalization principles used throughout:
 - **Direction canonicalization:** signed positional diffs (like `foot_x_diff`) flip sign depending on which way the person is facing the camera. Wherever this matters, the raw diff is multiplied by a direction sign before it's used, so "left foot forward" means the same thing regardless of camera orientation.
 - **MediaPipe's left/right is camera-perspective, not person-perspective:** landmark 11 ("left shoulder" in MediaPipe's naming) is the shoulder on the *camera's* left, which is the person's actual *right* shoulder when facing the camera. This project treats left/right as person-perspective throughout, which means every place a landmark index is used, the mapping has to be sanity-checked — this has been a recurring source of bugs.
 
+![SHAP feature importance for punch features](analysis_output/punch/shap_feature_importance.png)
+![SHAP feature importance for stance (Southpaw vs Orthodox)](analysis_output/stance/shap_feature_importance.png)
+
 ---
 
 ## How we calculate our own depth (z) — `get_z.py`
